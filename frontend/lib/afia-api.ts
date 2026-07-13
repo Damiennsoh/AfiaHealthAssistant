@@ -3,7 +3,20 @@
  * Replaces Firebase SDK calls with REST API calls to self-hosted backend
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Get API base URL - must work in both SSR and client contexts
+function getAPIBase(): string {
+  // In Next.js, process.env.NEXT_PUBLIC_* variables are available at build time
+  // and are inlined into the JavaScript bundle
+  if (typeof window === 'undefined') {
+    // Server-side (should not reach here since this is a client-side API)
+    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  }
+  
+  // Client-side: use the inlined value from build time
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+}
+
+const API_BASE = getAPIBase();
 
 interface ApiResponse<T> {
   data?: T;
