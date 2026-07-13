@@ -85,6 +85,15 @@ class Settings(BaseSettings):
             return self.cors_origins
         return ["http://localhost:3000"]
 
+    @property
+    def async_database_url(self) -> str:
+        """Convert database URL to use asyncpg driver if needed."""
+        if not self.database_url:
+            raise ValueError("DATABASE_URL is required")
+        if self.database_url.startswith("postgresql://"):
+            return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return self.database_url
+
     # ── Billing (Stripe) ───────────────────────────────────
     stripe_secret_key: Optional[str] = Field(default=None)
     stripe_webhook_secret: Optional[str] = Field(default=None)
