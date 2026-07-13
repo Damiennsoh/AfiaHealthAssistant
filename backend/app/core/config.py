@@ -67,9 +67,9 @@ class Settings(BaseSettings):
     qdrant_api_key: Optional[str] = Field(default=None)
 
     # ── MinIO ────────────────────────────────────────────────
-    minio_endpoint: str
-    minio_root_user: str
-    minio_root_password: str
+    minio_endpoint: Optional[str] = Field(default=None)
+    minio_root_user: Optional[str] = Field(default=None)
+    minio_root_password: Optional[str] = Field(default=None)
     minio_secure: bool = Field(default=False)
 
     # ── API ──────────────────────────────────────────────────
