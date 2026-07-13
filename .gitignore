@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Env
+backend/venv/
+venv/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+backend/.env
+backend/.env.local
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build Outputs
+.next/
+dist/
+build/
+*.log
+
+# Test Files
+test-results/
+coverage/
+
+# Temporary Files
+*.tmp
+*.temp
+*.cache
+
+# Static Files Generated Locally
+static/
+backend/static/
+frontend/.next/
+frontend/node_modules/

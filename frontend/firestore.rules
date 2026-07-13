@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is signed in
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper to detect administrators (set via custom claim)
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.isAdmin == true;
+    }
+
+    // Helper function to check if user has clinic claims
+    function hasClinicClaims() {
+      return isSignedIn() && 
+             request.auth.token.clinicId != null && 
+             request.auth.token.isClinicUser == true;
+    }
+
+    // Helper function to verify user can access specific clinic
+    function canAccessClinic(clinicId) {
+      return hasClinicClaims() && request.auth.token.clinicId == clinicId;
+    }
+
+    match /artifacts/afia-health-assistant/{document=**} {
+      
+      // 1. CLINIC DATA (Patients, Encounters)
+      // SECURE: Only users with valid clinic claims can access their specific clinic
+      // This prevents cross-clinic data access and ensures complete isolation
+      match /clinics/{clinicId}/{collectionName}/{docId} {
+        allow read, write: if canAccessClinic(clinicId) || isAdmin();
+      }
+
+      // 2. PUBLIC REFERENCE DATA (Medical Knowledge)
+      // Safe for anyone to read
+      match /public/data/knowledge/{item} {
+        allow read: if true;
+        allow write: if isSignedIn(); // Only staff can update knowledge
+      }
+
+      // 3. CLOUD RELAY (Sensitive Patient Data)
+      // SECURE: Only authenticated users with clinic claims can access relays
+      // This ensures patient data relay is protected and auditable
+      match /public/data/relays/{code} {
+        allow read, write: if hasClinicClaims();
+      }
+      
+      // 4. P2P HANDSHAKES (Signaling)
+      // SECURE: Only authenticated users with clinic claims can participate
+      match /public/p2p-handshakes/{code} {
+        allow read, write: if hasClinicClaims();
+      }
+
+      // security registry for global lockout documents
+      match /public/data/security_registry/{uid} {
+        // user may manage their own lockout record, admins may manipulate any
+        allow read, write: if request.auth != null && 
+                            (request.auth.uid == uid || isAdmin());
+      }
+    }
+  }
+}

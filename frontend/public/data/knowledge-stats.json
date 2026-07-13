@@ -1,0 +1,14 @@
+{
+  "total": 2407,
+  "withEmbeddings": 2407,
+  "byCountry": {
+    "GH": 1803,
+    "ZW": 604
+  },
+  "bySource": {
+    "GHANA-STG-2017": 1728,
+    "NHIS-ML-2025": 75,
+    "EDLIZ-2020": 604
+  },
+  "generatedAt": "2026-07-02T02:26:07.893Z"
+}

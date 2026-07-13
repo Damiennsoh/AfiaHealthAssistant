@@ -1,0 +1,22 @@
+{
+  "name": "Afia Health Assistant",
+  "short_name": "Afia Health",
+  "description": "Offline-First Clinical Decision Support System for rural Ghana",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#059669",
+  "icons": [
+    {
+      "src": "/icon-light-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "orientation": "portrait-primary"
+}

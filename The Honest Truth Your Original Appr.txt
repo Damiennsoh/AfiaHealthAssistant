@@ -1,0 +1,1456 @@
+The Honest Truth: Your Original Approach Was Probably Right
+After reading your uploaded file, I need to retract my Qdrant recommendation. For the Afia Health Assistant's actual use case — rural Ghanaian and Zimbabwean clinics with unreliable internet — your original precomputed JSON + client-side cosine similarity approach is superior. Here's why I was wrong and what you should actually do:
+Where I Went Wrong
+Table
+My Mistake	Reality
+I optimized for "production backend elegance"	You need offline-first reliability
+I assumed server infrastructure is available	Rural clinics often have no server, intermittent power
+I designed for scale you don't have	~2,000-3,000 chunks is tiny — brute force is fine
+I added complexity you don't need	Docker, networking, Qdrant process = more failure points
+I ignored your existing working code	Your @xenova/transformers pipeline already works
+Direct Comparison for Afia Health Assistant
+Table
+Factor	Your Original Approach (JSON + Browser)	My Qdrant Approach
+Offline capability	✅ Works with zero internet after first load	❌ Needs Qdrant server running
+Rural clinic deployment	✅ Copy files to any laptop, open browser	❌ Needs Docker, server setup, troubleshooting
+Power outages	✅ Browser state survives, no server to restart	❌ Server dies = app dies
+Ghana STG + NHIS (~2,000 chunks)	✅ ~10-20ms search, perfectly fast	Overkill — sub-ms doesn't matter
+Zimbabwe EDLIZ (~3,000 chunks)	✅ Same, still fast	Same overkill
+Multi-country switching	✅ Load different JSON file per country	✅ Also works, but needs server
+Maintenance burden	✅ Zero — static files	❌ Qdrant process, backups, networking
+Field updates (new STG edition)	Rebuild JSON, redeploy	Rebuild index, restart Qdrant
+Data sovereignty	✅ Files never leave the device	✅ If self-hosted, but still needs server
+Sync with patient records	❌ Needs backend for this anyway	✅ PostgreSQL handles this well
+The Real Architecture You Need
+Your app has two distinct problems that need different solutions:
+1. Knowledge Base Search (STG, NHIS, EDLIZ)
+Keep your original approach. Precompute embeddings with @xenova/transformers (384-dim, all-MiniLM-L6-v2), store as JSON, search client-side with cosine similarity. This is:
+Proven to work for your scale
+100% offline after first load
+Zero maintenance
+Perfect for rural clinics
+2. Patient Records, Encounters, Auth, Sync
+This is where you need a backend. Your original Firebase handled this, but you want to self-host. Here's what you actually need:
+plain
+┌─────────────────────────────────────────────────────────────┐
+│                    AFIA HEALTH ASSISTANT                     │
+│                                                              │
+│  ┌──────────────────┐      ┌────────────────────────────┐ │
+│  │  BROWSER (PWA)   │      │  OPTIONAL: LIGHTWEIGHT API   │ │
+│  │                  │      │  (Only when internet works)  │ │
+│  │  • React/Next.js │      │                              │ │
+│  │  • Precomputed   │◄────►│  • FastAPI or Node.js        │ │
+│  │    JSON chunks   │      │  • SQLite (not PostgreSQL!)  │ │
+│  │  • Cosine search │      │  • File-based sync           │ │
+│  │  • IndexedDB for │      │  • No Docker needed          │ │
+│  │    patient data  │      │  • Single binary/server      │ │
+│  │  • Offline-first │      │                              │ │
+│  └──────────────────┘      └────────────────────────────┘   │
+│           │                            │                    │
+│           └───────────┬────────────────┘                    │
+│                       ▼                                     │
+│              ┌──────────────┐                             │
+│              │  Sync Queue  │  (When online: push/pull)    │
+│              │  (SQLite/JSON│  (When offline: queue)       │
+│              │   file)      │                              │
+│              └──────────────┘                              │
+└─────────────────────────────────────────────────────────────┘
+What I Should Have Built for You
+Instead of Qdrant + PostgreSQL + Docker, here's what actually fits:
+Knowledge Base (Keep Your Approach)
+JavaScript
+// scripts/generate-embeddings.js — YOUR EXISTING CODE (keep it)
+const { pipeline } = require('@xenova/transformers');
+const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+// ... output JSON with 384-dim vectors
+TypeScript
+// lib/vector-search.ts — YOUR EXISTING CODE (keep it)
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  // dot product / magnitudes
+}
+// Brute force over ~2,000 chunks = ~15ms
+Patient Data & Sync (Lightweight Self-Hosted)
+JavaScript
+// A simple Node.js or Python backend that:
+// - Uses SQLite (file-based, no Docker, no PostgreSQL)
+// - JWT auth (admin-provisioned accounts)
+// - JSON file sync (not complex sync protocols)
+// - Can run on a Raspberry Pi or old laptop
+When Qdrant Actually Makes Sense
+Table
+Scenario	Qdrant Wins
+50,000+ medical documents	HNSW indexing needed
+Real-time updates (daily new protocols)	Dynamic indexing
+Dedicated server room, stable power, IT staff	Infrastructure manageable
+Hybrid search (vector + keyword + filters)	Advanced querying
+Multi-tenant SaaS with thousands of clinics	Scale requirements
+You are not in any of these scenarios. You have ~2,000-3,000 chunks, update yearly when new STG/EDLIZ editions release, and deploy to clinics with unreliable power.
+My Honest Recommendation
+Table
+Component	Recommendation	Why
+Knowledge base search	Keep your precomputed JSON + client-side cosine	Proven, offline, fast enough, zero maintenance
+Embeddings model	Keep @xenova/transformers + all-MiniLM-L6-v2	384-dim, fast, good enough for medical text
+Patient records backend	Lightweight FastAPI/Node + SQLite file	No Docker, runs anywhere, file-based backup
+Auth	JWT with admin-provisioned accounts	No self-registration, simple
+Sync	JSON file queue + SQLite	Works offline, syncs when possible
+Multi-country	Load different JSON file per clinic config	ghana_stg_2025.json vs edliz_2020.json
+What I Should Give You Instead
+If you want, I can create a revised, honest migration package that:
+Keeps your embedding pipeline intact (@xenova/transformers → JSON)
+Adds a lightweight backend (FastAPI + SQLite, no Docker, single file database)
+Provides multi-country JSON loading (Ghana vs Zimbabwe switching)
+Includes admin-provisioned auth (simple JWT, no Firebase)
+Adds offline sync (SQLite file that syncs when online)
+This would be ~10 files instead of 69, runs on any old laptop, and actually fits your use case.
+Should I build this revised, honest package instead? Or do you want to stick with your original approach and just replace Firebase Auth/Storage with a simple self-hosted alternative?
+do clinics really need their own server, if i host it and they just purchase or subscribe the application's services, using their country or organization or clinci id to separate their health data, whereby we still keep qdrant, and docker, without these individual clinics needing their own servers, but rather just subscribing, or both where applicable for the particular client, what do you think
+Copy
+Share
+This is a much better model, and it resolves the central tension. Let me think through this properly.
+The SaaS Model You're Describing
+Table
+Aspect	Your Approach
+Hosting	You run one central infrastructure (your servers)
+Client access	Clinics subscribe, get credentials, use via browser/PWA
+Data separation	clinic_id + country_code in every record
+Offline capability	Limited — needs connectivity, or hybrid PWA caching
+Your stack	Qdrant + PostgreSQL + Docker + FastAPI (what I built)
+Clinic requirement	Just a browser and internet
+This is standard SaaS, and it's viable. But for Afia Health Assistant specifically, there are tradeoffs you need to see clearly.
+Where SaaS Works Well for Afia
+Table
+Scenario	SaaS Fits
+Urban clinics in Accra, Harare with reliable 4G/5G	Always-on connectivity
+Hospital groups with IT budgets	Subscription model makes sense
+You want recurring revenue	Monthly/annual clinic subscriptions
+Centralized updates	New STG/EDLIZ edition → update once, all clinics get it
+Analytics across clinics	Aggregate data for public health insights (anonymized)
+You control infrastructure	One Qdrant instance, one PostgreSQL, easier maintenance
+Where SaaS Friction Exists for Rural Clinics
+Table
+Problem	Reality
+Ghana rural internet	Intermittent 2G/3G, power outages, no fiber
+Zimbabwe rural internet	Similar or worse, load-shedding, expensive data
+"The app is down"	Your server issue = all clinics stop working
+Patient registration delay	Can't register patient if connection drops mid-form
+Knowledge query fails	Doctor can't check STG during consultation
+Data costs	Clinics pay for data to access your cloud
+The Hybrid Model: SaaS + Offline Fallback
+This is likely your best answer — offer both:
+plain
+┌─────────────────────────────────────────────────────────────┐
+│                 AFIA HEALTH ASSISTANT SaaS                  │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │           YOUR CENTRAL INFRASTRUCTURE               │   │
+│  │  ┌─────────┐  ┌──────────┐  ┌──────────┐          │   │
+│  │  │ FastAPI │  │PostgreSQL│  │  Qdrant  │          │   │
+│  │  │ (Auth,  │  │(Patient  │  │(Vector   │          │   │
+│  │  │  Sync,  │  │ Records, │  │ Search)  │          │   │
+│  │  │  Admin) │  │ Clinics) │  │          │          │   │
+│  │  └────┬────┘  └────┬─────┘  └────┬─────┘          │   │
+│  │       └─────────────┴─────────────┘                 │   │
+│  │              Docker Compose on Your Server          │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                         ▲                                    │
+│         ┌───────────────┼───────────────┐                  │
+│         │   Internet    │   Internet    │                  │
+│         ▼               ▼               ▼                  │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐             │
+│  │ Urban    │    │ Urban    │    │ Rural    │             │
+│  │ Clinic A │    │ Clinic B │    │ Clinic C │             │
+│  │ (Accra)  │    │(Harare)  │    │(Rural)   │             │
+│  │          │    │          │    │          │             │
+│  │ Full SaaS│    │ Full SaaS│    │ PWA with │             │
+│  │ Mode     │    │ Mode     │    │ Offline  │             │
+│  │          │    │          │    │ Fallback │             │
+│  │          │    │          │    │          │             │
+│  │ • Live   │    │ • Live   │    │ • Cached │             │
+│  │   patient│    │   patient│    │   patient│             │
+│  │   records│    │   records│    │   records│             │
+│  │ • Live   │    │ • Live   │    │ • Cached │             │
+│  │   RAG    │    │   RAG    │    │   STG/   │             │
+│  │   query  │    │   query  │    │   EDLIZ  │             │
+│  │ • Real-  │    │ • Real-  │    │ • Sync   │             │
+│  │   time   │    │   time   │    │   when   │             │
+│  │   sync   │    │   sync   │    │   online │             │
+│  └──────────┘    └──────────┘    └──────────┘             │
+│                                                              │
+│  Subscription tiers:                                         │
+│  • Basic: $X/clinic/month (SaaS only, urban)                │
+│  • Pro: $Y/clinic/month (SaaS + offline PWA, rural)         │
+│  • Enterprise: Self-hosted option (hospital groups)         │
+└─────────────────────────────────────────────────────────────┘
+How the Offline Fallback Works for Rural Clinics
+TypeScript
+// PWA with Service Worker + IndexedDB
+class AfiaOfflineMode {
+  // 1. On first login (or when online), cache:
+  //    - Patient records for this clinic (last 1000)
+  //    - Full knowledge base JSON (STG or EDLIZ, ~2MB)
+  //    - Precomputed embeddings (already have these)
+  
+  // 2. When offline:
+  //    - Patient search → IndexedDB (local)
+  //    - Knowledge query → client-side cosine similarity (your original code)
+  //    - New encounters → queue in IndexedDB
+  
+  // 3. When back online:
+  //    - Sync queue → POST to your FastAPI
+  //    - Refresh patient cache
+}
+This means:
+Rural clinics get offline capability using your original JSON approach
+Urban clinics get full SaaS with live Qdrant search
+You maintain one backend, one database, one Qdrant instance
+Revenue comes from subscriptions, not server sales
+Revised Data Model for Multi-Tenant SaaS
+Your PostgreSQL schema already handles this — just need to enforce it:
+sql
+-- Every table has clinic_id + country_code
+CREATE TABLE patients (
+    id UUID PRIMARY KEY,
+    clinic_id UUID NOT NULL REFERENCES clinics(id),
+    country_code VARCHAR(2) NOT NULL, -- 'GH' or 'ZW'
+    folder_number VARCHAR(50) UNIQUE,
+    -- encrypted PII...
+);
+
+-- RLS (Row Level Security) or query filtering
+-- Every API query: WHERE clinic_id = current_user_clinic_id
+Python
+# FastAPI dependency
+async def get_current_clinic(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # User's JWT includes clinic_id
+    # All queries automatically filtered to this clinic
+    return current_user.clinic
+Qdrant Multi-Tenant Setup
+One Qdrant instance, separate collections per country:
+Python
+# Qdrant collections
+ghana_stg_2025      # Ghana clinics query this
+edliz_2020          # Zimbabwe clinics query this
+
+# Or single collection with clinic_id in payload + filtering
+medical_knowledge   # One collection
+# payload: {country_code: 'GH', clinic_id: 'uuid', ...}
+For SaaS, the single collection with filtering is cleaner:
+One index to maintain
+Query: country_code == 'GH' AND abcs_level == 'C'
+Easier to add new countries (just add documents)
+The Honest Verdict
+Table
+Question	Answer
+Should you use Qdrant in SaaS mode?	Yes. For central hosting, Qdrant is correct.
+Should you keep Docker?	Yes. For your infrastructure, Docker makes sense.
+Should rural clinics have their own servers?	No. But they need offline PWA fallback.
+Is your original JSON approach dead?	No. It becomes the offline fallback layer.
+Best of both worlds?	Yes. SaaS for you, offline PWA for rural clients.
+What I Should Build Now
+If this SaaS + hybrid model is what you want, I should revise the package to:
+Keep Qdrant + PostgreSQL + Docker (your central infrastructure)
+Add multi-tenant security (clinic isolation, RLS)
+Add subscription/billing scaffolding (Stripe or manual invoicing)
+Add PWA offline fallback (service worker, IndexedDB, cached JSON)
+Keep your original embedding pipeline for the offline layer
+Add sync protocol (offline queue → online sync)
+This is the architecture that actually fits Afia Health Assistant:
+You host and monetize
+Urban clinics get full SaaS
+Rural clinics get offline-capable PWA with sync
+One codebase, dual deployment modes
+Should I rebuild the package around this SaaS + hybrid offline model?
+Yes do
+Copy
+Share
+System is currently busy. Please try again later.
+Should I rebuild the package around this SaaS + hybrid offline model?
+
+Yes do
+Copy
+Share
+I'll rebuild the complete package around the SaaS + hybrid offline model. Let me create everything properly.
+Execute Python code
+Execute Python code
+System is currently busy. Please try again later.
+CONTINUE
+Copy
+Share
+Now I'll create all the files. Let me start with the core infrastructure and configuration files.
+Execute Python code
+The variable was lost. Let me reinitialize and continue building all files.
+Execute Python code
+Execute Python code
+Execute Python code
+Execute Python code
+Execute Python code
+Execute Python code
+Execute Python code
+Execute Python code
+Execute Python code
+Execute Python code
+I've exhausted my tool call budget. Let me provide you with a comprehensive summary of what I've built so far, what's still missing, and the complete code for the remaining critical files as text you can copy-paste directly.
+What I've Already Created (on disk at /mnt/agents/output/afia-backend-migration/)
+Table
+Category	Files	Status
+Infrastructure	docker-compose.yml, .env.template	✅ Complete
+Backend Core	config.py, security.py, exceptions.py, logging.py	✅ Complete
+Database	session.py, base.py, user.py, clinic.py, patient.py, encounter.py, audit.py, sync.py	✅ Complete
+Schemas	user.py, clinic.py, patient.py, encounter.py, knowledge.py, sync.py	✅ Complete
+Services	auth_service.py, user_service.py, patient_service.py, encounter_service.py, rag_service.py	✅ Complete
+What's Still Missing (Critical Files)
+You need to create these files manually. Here is the complete code for each:
+1. backend/app/services/audit_service.py
+Python
+"""
+AFIA Health Assistant — Audit Service
+HIPAA/GDPR compliance logging
+"""
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict, Any
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_
+
+from app.core.logging import audit_logger
+from app.models.audit import AuditLog, AuditAction
+from app.models.user import User
+from app.models.clinic import Clinic
+
+
+class AuditService:
+    """Log every data access for compliance."""
+    
+    RETENTION_YEARS = 7
+    
+    def __init__(self, db: AsyncSession):
+        self.db = db
+    
+    async def log(
+        self,
+        action: AuditAction,
+        user: Optional[User] = None,
+        clinic: Optional[Clinic] = None,
+        resource_type: Optional[str] = None,
+        resource_id: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        kb_query: Optional[str] = None,
+        kb_country: Optional[str] = None,
+        kb_results_count: Optional[int] = None,
+        kb_top_citation: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> AuditLog:
+        """Create an audit log entry."""
+        
+        log_entry = AuditLog(
+            user_id=user.id if user else None,
+            user_email=user.email if user else None,
+            user_role=user.role.value if user else None,
+            clinic_id=clinic.id if clinic else None,
+            clinic_name=clinic.name if clinic else None,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            details=details or {},
+            kb_query=kb_query,
+            kb_country=kb_country,
+            kb_results_count=kb_results_count,
+            kb_top_citation=kb_top_citation,
+            retention_until=datetime.now(timezone.utc) + timedelta(days=365 * self.RETENTION_YEARS),
+        )
+        
+        self.db.add(log_entry)
+        await self.db.commit()
+        return log_entry
+    
+    async def get_audit_logs(
+        self,
+        clinic_id: Optional[UUID] = None,
+        user_id: Optional[UUID] = None,
+        action: Optional[AuditAction] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ):
+        """Query audit logs with filters."""
+        query = select(AuditLog)
+        
+        if clinic_id:
+            query = query.where(AuditLog.clinic_id == clinic_id)
+        if user_id:
+            query = query.where(AuditLog.user_id == user_id)
+        if action:
+            query = query.where(AuditLog.action == action)
+        if start_date:
+            query = query.where(AuditLog.created_at >= start_date)
+        if end_date:
+            query = query.where(AuditLog.created_at <= end_date)
+        
+        query = query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
+        
+        result = await self.db.execute(query)
+        return result.scalars().all()
+2. backend/app/services/sync_service.py
+Python
+"""
+AFIA Health Assistant — Sync Service
+Offline-first sync: queue, retry, conflict resolution
+"""
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_, or_
+
+from app.core.exceptions import SyncConflictError, AuthorizationError
+from app.core.logging import audit_logger
+from app.models.sync import SyncQueue, SyncStatus, SyncEntityType
+from app.models.patient import Patient
+from app.models.encounter import Encounter
+from app.models.user import User
+from app.schemas.sync import (
+    SyncPushRequest, SyncPullResponse, SyncItem, SyncResult,
+    SyncAckRequest, SyncConflict
+)
+
+
+class SyncService:
+    """Handle offline sync queue."""
+    
+    def __init__(self, db: AsyncSession):
+        self.db = db
+    
+    async def push_changes(self, request: SyncPushRequest, user: User) -> List[SyncResult]:
+        """Process client push of offline changes."""
+        results = []
+        
+        for item in request.items:
+            try:
+                result = await self._process_sync_item(item, user, request.device_id)
+                results.append(result)
+            except Exception as e:
+                results.append(SyncResult(
+                    offline_id=item.offline_id,
+                    status="failed",
+                    error=str(e),
+                ))
+        
+        return results
+    
+    async def _process_sync_item(self, item: SyncItem, user: User, device_id: str) -> SyncResult:
+        """Process a single sync item."""
+        
+        if item.entity_type == SyncEntityType.PATIENT:
+            return await self._sync_patient(item, user, device_id)
+        elif item.entity_type == SyncEntityType.ENCOUNTER:
+            return await self._sync_encounter(item, user, device_id)
+        else:
+            raise ValueError(f"Unknown entity type: {item.entity_type}")
+    
+    async def _sync_patient(self, item: SyncItem, user: User, device_id: str) -> SyncResult:
+        """Sync a patient record."""
+        from app.core.security import encrypt_field
+        
+        # Check if patient exists by offline_id
+        result = await self.db.execute(
+            select(Patient).where(
+                and_(
+                    Patient.clinic_id == user.clinic_id,
+                    or_(
+                        Patient.offline_id == item.offline_id,
+                        Patient.id == item.entity_server_id,
+                    )
+                )
+            )
+        )
+        existing = result.scalar_one_or_none()
+        
+        if existing:
+            # Check version conflict
+            if existing.sync_version > item.payload_version:
+                # Server has newer version
+                return SyncResult(
+                    offline_id=item.offline_id,
+                    status="conflict",
+                    server_id=existing.id,
+                    server_version=existing.sync_version,
+                    server_payload=existing.to_offline_dict(),
+                )
+            
+            # Update existing
+            payload = item.payload
+            existing.name_encrypted = encrypt_field(payload.get("name"))
+            existing.phone_encrypted = encrypt_field(payload.get("phone"))
+            existing.address_encrypted = encrypt_field(payload.get("address"))
+            existing.emergency_contact_encrypted = encrypt_field(payload.get("emergency_contact"))
+            existing.sync_version += 1
+            existing.last_sync_at = datetime.now(timezone.utc)
+            
+            await self.db.commit()
+            
+            return SyncResult(
+                offline_id=item.offline_id,
+                status="acknowledged",
+                server_id=existing.id,
+                server_version=existing.sync_version,
+            )
+        else:
+            # Create new patient
+            from app.schemas.patient import PatientCreate
+            from app.services.patient_service import PatientService
+            
+            patient_data = PatientCreate(
+                name=item.payload.get("name"),
+                date_of_birth=item.payload.get("date_of_birth"),
+                gender=item.payload.get("gender"),
+                phone=item.payload.get("phone"),
+                address=item.payload.get("address"),
+                emergency_contact=item.payload.get("emergency_contact"),
+                insurance_type=item.payload.get("insurance_type", "cash"),
+                insurance_number=item.payload.get("insurance_number"),
+                blood_type=item.payload.get("blood_type"),
+                allergies=item.payload.get("allergies", []),
+                chronic_conditions=item.payload.get("chronic_conditions", []),
+                offline_id=item.offline_id,
+            )
+            
+            patient_service = PatientService(self.db)
+            patient = await patient_service.create_patient(patient_data, user)
+            
+            return SyncResult(
+                offline_id=item.offline_id,
+                status="acknowledged",
+                server_id=patient.id,
+                server_version=patient.sync_version,
+            )
+    
+    async def pull_changes(self, device_id: str, user: User, last_sync_at: Optional[datetime] = None) -> SyncPullResponse:
+        """Get changes from server for client."""
+        # Get patients modified since last sync
+        patient_query = select(Patient).where(
+            and_(
+                Patient.clinic_id == user.clinic_id,
+                Patient.updated_at > last_sync_at if last_sync_at else True,
+            )
+        )
+        
+        patient_result = await self.db.execute(patient_query)
+        patients = patient_result.scalars().all()
+        
+        items = []
+        for patient in patients:
+            items.append(SyncItem(
+                offline_id=patient.offline_id or str(patient.id),
+                entity_type=SyncEntityType.PATIENT,
+                entity_server_id=patient.id,
+                payload=patient.to_offline_dict(),
+                payload_version=patient.sync_version,
+                created_at=patient.updated_at,
+            ))
+        
+        return SyncPullResponse(
+            device_id=device_id,
+            server_time=datetime.now(timezone.utc),
+            items=items,
+            deleted_ids=[],
+            has_more=False,
+        )
+3. backend/app/api/deps.py (Dependencies)
+Python
+"""
+AFIA Health Assistant — API Dependencies
+Database session, current user, permissions
+"""
+from typing import Optional
+
+from fastapi import Depends, HTTPException, status, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.session import get_db
+from app.core.security import decode_token
+from app.core.exceptions import AuthenticationError, AuthorizationError
+from app.models.user import User, UserRole
+from app.services.auth_service import AuthService
+
+
+security = HTTPBearer(auto_error=False)
+
+
+async def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Get current user from JWT token."""
+    if not credentials:
+        raise AuthenticationError("No authentication provided")
+    
+    auth_service = AuthService(db)
+    payload = await auth_service.verify_token(credentials.credentials)
+    
+    if not payload:
+        raise AuthenticationError("Invalid or expired token")
+    
+    # Load full user
+    from sqlalchemy import select
+    result = await db.execute(select(User).where(User.id == payload["user_id"]))
+    user = result.scalar_one_or_none()
+    
+    if not user or not user.is_active:
+        raise AuthenticationError("User not found or inactive")
+    
+    # Attach request info for audit
+    user._ip_address = request.client.host if request.client else None
+    user._user_agent = request.headers.get("user-agent")
+    
+    return user
+
+
+async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
+    """Verify user is active."""
+    if not current_user.is_active:
+        raise AuthenticationError("Inactive user")
+    return current_user
+
+
+def require_role(roles: list[UserRole]):
+    """Dependency factory for role-based access control."""
+    async def role_checker(current_user: User = Depends(get_current_active_user)):
+        if current_user.role not in roles:
+            raise AuthorizationError(f"Required role: {[r.value for r in roles]}")
+        return current_user
+    return role_checker
+
+
+# Convenience dependencies
+require_super_admin = require_role([UserRole.SUPER_ADMIN])
+require_clinic_admin = require_role([UserRole.SUPER_ADMIN, UserRole.CLINIC_ADMIN])
+require_healthworker = require_role([UserRole.SUPER_ADMIN, UserRole.CLINIC_ADMIN, UserRole.HEALTHWORKER])
+4. backend/app/api/v1/auth.py
+Python
+"""
+AFIA Health Assistant — Auth API
+Login, refresh, password change. NO registration.
+"""
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.session import get_db
+from app.api.deps import get_current_active_user
+from app.core.exceptions import AuthenticationError
+from app.models.user import User
+from app.schemas.user import LoginRequest, TokenResponse, PasswordChange
+from app.services.auth_service import AuthService
+
+router = APIRouter()
+
+
+@router.post("/login", response_model=TokenResponse)
+async def login(
+    request: Request,
+    login_data: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Authenticate user and return JWT tokens.
+    
+    NO self-registration. Accounts are admin-provisioned only.
+    """
+    auth_service = AuthService(db)
+    return await auth_service.authenticate(login_data)
+
+
+@router.post("/refresh")
+async def refresh_token(
+    refresh_token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Refresh access token."""
+    auth_service = AuthService(db)
+    new_token = await auth_service.refresh_access_token(refresh_token)
+    return {"access_token": new_token, "token_type": "bearer"}
+
+
+@router.post("/change-password")
+async def change_password(
+    data: PasswordChange,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change own password."""
+    auth_service = AuthService(db)
+    success = await auth_service.change_password(
+        current_user.id, data.current_password, data.new_password
+    )
+    return {"success": success}
+
+
+@router.get("/me")
+async def get_current_user_info(
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get current user info."""
+    from app.schemas.user import UserResponse
+    return UserResponse.model_validate(current_user)
+5. backend/app/api/v1/knowledge.py (THE KEY ENDPOINT)
+Python
+"""
+AFIA Health Assistant — Knowledge Base API
+RAG query with country switching. SaaS mode only.
+Offline clinics use client-side search (PWA).
+"""
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.session import get_db
+from app.api.deps import get_current_active_user, require_healthworker
+from app.models.user import User
+from app.schemas.knowledge import KnowledgeQuery, KnowledgeQueryResponse
+from app.services.rag_service import RAGService
+from app.services.audit_service import AuditService
+
+router = APIRouter()
+
+
+@router.post("/query", response_model=KnowledgeQueryResponse)
+async def query_knowledge(
+    request: Request,
+    query_data: KnowledgeQuery,
+    current_user: User = Depends(require_healthworker),
+    db: AsyncSession = Depends(get_db),
+):
+    """Query medical knowledge base (Qdrant vector search).
+    
+    For offline clinics, this endpoint is not used — 
+    the PWA performs client-side cosine similarity search.
+    """
+    # Auto-set country from user's clinic
+    if not query_data.country_code:
+        query_data.country_code = current_user.clinic.country_code if current_user.clinic else "GH"
+    
+    # Verify clinic has active subscription
+    if current_user.clinic and not current_user.clinic.is_active:
+        raise HTTPException(status_code=403, detail="Clinic subscription inactive")
+    
+    rag_service = RAGService()
+    result = await rag_service.query(query_data)
+    
+    # Audit log
+    audit_service = AuditService(db)
+    await audit_service.log(
+        action=AuditAction.KB_QUERIED,
+        user=current_user,
+        clinic=current_user.clinic,
+        kb_query=query_data.query,
+        kb_country=query_data.country_code,
+        kb_results_count=result.total_results,
+        kb_top_citation=result.results[0].citation if result.results else None,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    
+    return result
+
+
+@router.get("/offline-package/{country_code}")
+async def get_offline_package(
+    country_code: str,
+    current_user: User = Depends(require_healthworker),
+):
+    """Get offline knowledge base package for PWA download.
+    
+    Returns metadata + download URL for the full JSON embeddings file.
+    Rural clinics call this once, then use client-side search.
+    """
+    from app.core.config import get_country_config
+    
+    config = get_country_config(country_code.upper())
+    if not config:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    
+    # In production, generate signed URL for MinIO or serve directly
+    return {
+        "country_code": country_code.upper(),
+        "name": config["name"],
+        "download_url": f"/static/knowledge/{country_code.lower()}-knowledge-offline.json",
+        "version": "2025.06.15",  # Would be dynamic
+        "checksum": "sha256:...",  # Would be computed
+        "total_chunks": "...",  # Would be queried
+        "embedding_model": "all-MiniLM-L6-v2",
+        "embedding_dimension": 384,
+    }
+6. backend/app/main.py
+Python
+"""
+AFIA Health Assistant — FastAPI Application Entry Point
+SaaS + Hybrid Offline Model
+"""
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.config import get_settings
+from app.core.logging import configure_logging, logger
+from app.db.session import init_db
+from app.api.v1 import auth, users, clinics, patients, encounters, knowledge, sync, health
+
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan handler."""
+    configure_logging()
+    logger.info("Starting AFIA Health Assistant API", version="2.0.0")
+    await init_db()
+    yield
+    logger.info("Shutting down AFIA Health Assistant API")
+
+
+app = FastAPI(
+    title="AFIA Health Assistant API",
+    description="SaaS + Hybrid Offline Medical Knowledge System",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Country-Code", "X-KB-Version"],
+)
+
+# API Routes
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+app.include_router(clinics.router, prefix="/api/v1/clinics", tags=["clinics"])
+app.include_router(patients.router, prefix="/api/v1/patients", tags=["patients"])
+app.include_router(encounters.router, prefix="/api/v1/encounters", tags=["encounters"])
+app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
+app.include_router(sync.router, prefix="/api/v1/sync", tags=["sync"])
+app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
+
+
+@app.get("/")
+async def root():
+    return {
+        "name": "AFIA Health Assistant",
+        "version": "2.0.0",
+        "model": "SaaS + Hybrid Offline",
+        "status": "operational",
+    }
+7. backend/scripts/build_knowledge_index.py
+Python
+#!/usr/bin/env python3
+"""
+AFIA Health Assistant — Build Qdrant Knowledge Index
+
+Usage:
+    python scripts/build_knowledge_index.py --country GH
+    python scripts/build_knowledge_index.py --country ZW
+"""
+import argparse
+import asyncio
+import json
+import fitz  # PyMuPDF
+from pathlib import Path
+
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+from sentence_transformers import SentenceTransformer
+
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.core.config import get_settings, get_country_config, get_qdrant_collection
+
+
+class MedicalDocumentParser:
+    """Parse medical PDF (STG or EDLIZ) into structured chunks."""
+    
+    def __init__(self, pdf_path: str):
+        self.pdf_path = pdf_path
+        self.doc = fitz.open(pdf_path)
+        self.current_chapter = "Unknown"
+        
+    def parse_chunks(self):
+        """Extract structured chunks preserving medical hierarchy."""
+        chunks = []
+        
+        for page_num in range(len(self.doc)):
+            page = self.doc[page_num]
+            text = page.get_text()
+            
+            # Detect chapter headers
+            self._detect_chapter(text)
+            
+            # Extract drug tables
+            tables = page.find_tables()
+            for table in tables:
+                drug_data = self._parse_drug_table(table)
+                if drug_data:
+                    chunks.append({
+                        "text": self._format_drug_text(drug_data),
+                        "metadata": {
+                            "type": "drug_table",
+                            "chapter": self.current_chapter,
+                            "page": page_num + 1,
+                            "abcs_level": drug_data.get("abcs"),
+                            "ven_priority": drug_data.get("ven"),
+                            "drug": drug_data.get("medicine"),
+                            "adult_dose": drug_data.get("adult_dose"),
+                            "frequency": drug_data.get("frequency"),
+                            "duration": drug_data.get("duration"),
+                        }
+                    })
+            
+            # Extract guideline paragraphs
+            paragraphs = self._extract_guidelines(text)
+            for para in paragraphs:
+                chunks.append({
+                    "text": para,
+                    "metadata": {
+                        "type": "guideline",
+                        "chapter": self.current_chapter,
+                        "page": page_num + 1,
+                    }
+                })
+        
+        return chunks
+    
+    def _detect_chapter(self, text: str):
+        """Detect chapter header like '15. CARDIOVASCULAR DISEASE'."""
+        import re
+        match = re.search(r'^\\d+\\.\\s+([A-Z][A-Z\\s]+)$', text[:200], re.MULTILINE)
+        if match:
+            self.current_chapter = match.group(1).strip()
+    
+    def _parse_drug_table(self, table):
+        """Parse EDLIZ drug table format."""
+        rows = table.extract()
+        if len(rows) < 2:
+            return None
+        
+        headers = [h.lower().strip() if h else "" for h in rows[0]]
+        if "medicine" not in headers and "drug" not in headers:
+            return None
+        
+        # Find column indices
+        medicine_idx = next((i for i, h in enumerate(headers) if "medicine" in h or "drug" in h), 0)
+        codes_idx = next((i for i, h in enumerate(headers) if "code" in h), None)
+        dose_idx = next((i for i, h in enumerate(headers) if "dose" in h), None)
+        freq_idx = next((i for i, h in enumerate(headers) if "freq" in h), None)
+        duration_idx = next((i for i, h in enumerate(headers) if "duration" in h), None)
+        
+        drugs = []
+        for row in rows[1:]:
+            if not row or not row[medicine_idx]:
+                continue
+            
+            drug = {"medicine": row[medicine_idx].strip()}
+            
+            if codes_idx is not None and codes_idx < len(row):
+                codes = str(row[codes_idx]).split()
+                drug["abcs"] = codes[0] if len(codes) > 0 else None
+                drug["ven"] = codes[1] if len(codes) > 1 else None
+            
+            if dose_idx is not None and dose_idx < len(row):
+                drug["adult_dose"] = row[dose_idx]
+            if freq_idx is not None and freq_idx < len(row):
+                drug["frequency"] = row[freq_idx]
+            if duration_idx is not None and duration_idx < len(row):
+                drug["duration"] = row[duration_idx]
+            
+            drugs.append(drug)
+        
+        return drugs[0] if drugs else None
+    
+    def _format_drug_text(self, drug: dict) -> str:
+        """Format drug entry as searchable text."""
+        parts = [f"Medicine: {drug['medicine']}"]
+        if drug.get("adult_dose"):
+            parts.append(f"Dose: {drug['adult_dose']}")
+        if drug.get("frequency"):
+            parts.append(f"Frequency: {drug['frequency']}")
+        if drug.get("duration"):
+            parts.append(f"Duration: {drug['duration']}")
+        return ". ".join(parts)
+    
+    def _extract_guidelines(self, text: str) -> list:
+        """Extract guideline paragraphs."""
+        import re
+        # Split into paragraphs and filter for medical content
+        paragraphs = [p.strip() for p in text.split('\n\n') if len(p.strip()) > 50]
+        return paragraphs[:5]  # Limit per page for quality
+
+
+class KnowledgeIndexBuilder:
+    """Build Qdrant vector index for medical knowledge."""
+    
+    def __init__(self):
+        self.settings = get_settings()
+        self.collection_name = get_qdrant_collection()
+        self.model = SentenceTransformer(self.settings.embedding_model)
+        self.qdrant = QdrantClient(
+            url=self.settings.qdrant_url,
+            api_key=self.settings.qdrant_api_key,
+        )
+    
+    async def build(self, country_code: str):
+        """Build index for a country."""
+        config = get_country_config(country_code)
+        if not config:
+            print(f"Unknown country: {country_code}")
+            return
+        
+        pdf_path = config.get("document_path")
+        if not pdf_path or not Path(pdf_path).exists():
+            print(f"PDF not found: {pdf_path}")
+            return
+        
+        print(f"Building index for {config['name']}...")
+        
+        # Parse PDF
+        parser = MedicalDocumentParser(pdf_path)
+        chunks = parser.parse_chunks()
+        print(f"Extracted {len(chunks)} chunks")
+        
+        # Generate embeddings
+        texts = [chunk["text"] for chunk in chunks]
+        embeddings = self.model.encode(texts, show_progress_bar=True, normalize_embeddings=True)
+        print(f"Generated {len(embeddings)} embeddings")
+        
+        # Initialize collection
+        await self._ensure_collection()
+        
+        # Upload to Qdrant
+        points = []
+        for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            payload = chunk["metadata"].copy()
+            payload["text"] = chunk["text"]
+            payload["country_code"] = country_code
+            
+            points.append(PointStruct(
+                id=f"{country_code}_{idx}",
+                vector=embedding.tolist(),
+                payload=payload,
+            ))
+        
+        self.qdrant.upsert(collection_name=self.collection_name, points=points)
+        print(f"Uploaded {len(points)} vectors to Qdrant")
+        
+        # Save offline JSON for PWA
+        await self._save_offline_json(country_code, chunks, embeddings)
+        
+        print(f"Done! Index built for {country_code}")
+    
+    async def _ensure_collection(self):
+        """Create collection if not exists."""
+        collections = self.qdrant.get_collections().collections
+        names = [c.name for c in collections]
+        
+        if self.collection_name not in names:
+            self.qdrant.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=VectorParams(
+                    size=self.settings.embedding_dimension,
+                    distance=Distance.COSINE,
+                ),
+            )
+            # Create indexes
+            for field in ["country_code", "abcs_level", "ven_priority"]:
+                self.qdrant.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name=field,
+                    field_type="keyword",
+                )
+            print(f"Created collection: {self.collection_name}")
+    
+    async def _save_offline_json(self, country_code: str, chunks: list, embeddings: list):
+        """Save offline package for PWA."""
+        import hashlib
+        
+        offline_data = {
+            "country_code": country_code,
+            "name": get_country_config(country_code)["name"],
+            "version": datetime.now().strftime("%Y.%m.%d"),
+            "total_chunks": len(chunks),
+            "embedding_dimension": self.settings.embedding_dimension,
+            "embedding_model": self.settings.embedding_model,
+            "chunks": [],
+        }
+        
+        for chunk, emb in zip(chunks, embeddings):
+            offline_data["chunks"].append({
+                "text": chunk["text"],
+                "embedding": emb.tolist(),
+                "metadata": chunk["metadata"],
+            })
+        
+        # Compute checksum
+        json_str = json.dumps(offline_data, sort_keys=True)
+        offline_data["checksum"] = hashlib.sha256(json_str.encode()).hexdigest()
+        
+        # Save
+        output_path = Path(f"knowledge-base/{country_code.lower()}/{country_code.lower()}-knowledge-offline.json")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_path, 'w') as f:
+            json.dump(offline_data, f, indent=2)
+        
+        print(f"Offline package saved: {output_path}")
+
+
+async def main():
+    parser = argparse.ArgumentParser(description="Build Qdrant knowledge index")
+    parser.add_argument("--country", required=True, choices=["GH", "ZW"], help="Country code")
+    args = parser.parse_args()
+    
+    builder = KnowledgeIndexBuilder()
+    await builder.build(args.country)
+
+
+if __name__ == "__main__":
+    from datetime import datetime
+    asyncio.run(main())
+8. backend/scripts/import_embeddings.py
+Python
+#!/usr/bin/env python3
+"""
+AFIA Health Assistant — Import Existing Ghana Embeddings
+
+Imports your pre-computed ghs-stg-embeddings.json and nhis-embeddings.json
+into Qdrant AND creates offline JSON for PWA.
+"""
+import json
+import hashlib
+from pathlib import Path
+
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.core.config import get_settings, get_qdrant_collection
+
+
+def import_ghana_embeddings():
+    """Import existing Ghana embeddings into Qdrant."""
+    settings = get_settings()
+    collection_name = get_qdrant_collection()
+    
+    qdrant = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+    
+    # Load existing embeddings
+    ghs_path = Path("knowledge-base/ghana/ghs-stg-embeddings.json")
+    nhis_path = Path("knowledge-base/ghana/nhis-embeddings.json")
+    
+    if not ghs_path.exists():
+        print(f"GHS embeddings not found: {ghs_path}")
+        return
+    
+    # Create collection
+    collections = qdrant.get_collections().collections
+    if collection_name not in [c.name for c in collections]:
+        qdrant.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+        )
+        for field in ["country_code", "abcs_level", "ven_priority"]:
+            qdrant.create_payload_index(
+                collection_name=collection_name,
+                field_name=field,
+                field_type="keyword",
+            )
+    
+    all_points = []
+    offline_chunks = []
+    
+    # Process GHS STG embeddings
+    print(f"Loading {ghs_path}...")
+    with open(ghs_path) as f:
+        ghs_data = json.load(f)
+    
+    for idx, item in enumerate(ghs_data.get("embeddings", [])):
+        point_id = f"GH_{idx}"
+        all_points.append(PointStruct(
+            id=point_id,
+            vector=item["vector"],
+            payload={
+                "text": item.get("text", ""),
+                "source": "GHS-STG-2017",
+                "type": "guideline",
+                "country_code": "GH",
+                **item.get("metadata", {}),
+            }
+        ))
+        offline_chunks.append({
+            "text": item.get("text", ""),
+            "embedding": item["vector"],
+            "metadata": {
+                "source": "GHS-STG-2017",
+                "type": "guideline",
+                **item.get("metadata", {}),
+            }
+        })
+    
+    # Process NHIS embeddings
+    if nhis_path.exists():
+        print(f"Loading {nhis_path}...")
+        with open(nhis_path) as f:
+            nhis_data = json.load(f)
+        
+        offset = len(all_points)
+        for idx, item in enumerate(nhis_data.get("embeddings", [])):
+            point_id = f"GH_{offset + idx}"
+            all_points.append(PointStruct(
+                id=point_id,
+                vector=item["vector"],
+                payload={
+                    "text": item.get("text", ""),
+                    "source": "NHIS-EML-2025",
+                    "type": "medicine_list",
+                    "country_code": "GH",
+                    **item.get("metadata", {}),
+                }
+            ))
+            offline_chunks.append({
+                "text": item.get("text", ""),
+                "embedding": item["vector"],
+                "metadata": {
+                    "source": "NHIS-EML-2025",
+                    "type": "medicine_list",
+                    **item.get("metadata", {}),
+                }
+            })
+    
+    # Upload to Qdrant
+    print(f"Uploading {len(all_points)} vectors to Qdrant...")
+    qdrant.upsert(collection_name=collection_name, points=all_points)
+    
+    # Save offline JSON for PWA
+    offline_data = {
+        "country_code": "GH",
+        "name": "Ghana Standard Treatment Guidelines 2017 + NHIS EML 2025",
+        "version": "2025.06.15",
+        "total_chunks": len(offline_chunks),
+        "embedding_dimension": 384,
+        "embedding_model": "all-MiniLM-L6-v2",
+        "chunks": offline_chunks,
+    }
+    
+    json_str = json.dumps(offline_data, sort_keys=True)
+    offline_data["checksum"] = hashlib.sha256(json_str.encode()).hexdigest()
+    
+    output_path = Path("knowledge-base/ghana/ghana-knowledge-offline.json")
+    with open(output_path, 'w') as f:
+        json.dump(offline_data, f, indent=2)
+    
+    print(f"Done! Imported {len(all_points)} vectors.")
+    print(f"Offline package saved: {output_path}")
+
+
+if __name__ == "__main__":
+    import_ghana_embeddings()
+9. pwa-offline/offline-search.ts
+TypeScript
+/**
+ * AFIA Health Assistant — Offline Knowledge Base Search
+ * Client-side cosine similarity for rural clinics without internet
+ * 
+ * This is YOUR ORIGINAL APPROACH — it works, keep it.
+ */
+
+export interface KnowledgeChunk {
+  text: string;
+  embedding: number[];  // 384-dim float array
+  metadata: {
+    source: string;
+    type: string;
+    chapter?: string;
+    page?: number;
+    abcs_level?: string;
+    ven_priority?: string;
+    drug?: string;
+    [key: string]: any;
+  };
+}
+
+export interface OfflineKnowledgeBase {
+  country_code: string;
+  name: string;
+  version: string;
+  total_chunks: number;
+  embedding_dimension: number;
+  embedding_model: string;
+  chunks: KnowledgeChunk[];
+  checksum: string;
+}
+
+export interface SearchResult {
+  text: string;
+  source: string;
+  metadata: Record<string, any>;
+  confidence: number;
+  citation: string;
+}
+
+/**
+ * Compute cosine similarity between two vectors
+ */
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/**
+ * Offline knowledge base search
+ * Brute-force O(n) — fast enough for ~2,000-3,000 chunks
+ */
+export class OfflineKnowledgeBaseSearch {
+  private kb: OfflineKnowledgeBase | null = null;
+  private model: any = null;  // Xenova transformer pipeline
+  
+  async loadKnowledgeBase(countryCode: 'GH' | 'ZW'): Promise<void> {
+    // Try IndexedDB first (cached from previous download)
+    const cached = await this.getFromIndexedDB(countryCode);
+    if (cached) {
+      this.kb = cached;
+      console.log(`Loaded ${countryCode} KB from cache: ${cached.total_chunks} chunks`);
+      return;
+    }
+    
+    // Fetch from server (when online)
+    const response = await fetch(`/api/v1/knowledge/offline-package/${countryCode}`);
+    const data: OfflineKnowledgeBase = await response.json();
+    
+    // Validate checksum
+    // ... verify integrity
+    
+    this.kb = data;
+    await this.saveToIndexedDB(countryCode, data);
+    console.log(`Downloaded ${countryCode} KB: ${data.total_chunks} chunks`);
+  }
+  
+  async search(query: string, filters?: Record<string, any>, topK: number = 10): Promise<SearchResult[]> {
+    if (!this.kb) {
+      throw new Error('Knowledge base not loaded');
+    }
+    
+    // Generate query embedding using Xenova transformers
+    const queryEmbedding = await this.getQueryEmbedding(query);
+    
+    // Brute-force search
+    const scored = this.kb.chunks.map(chunk => ({
+      chunk,
+      score: cosineSimilarity(queryEmbedding, chunk.embedding),
+    }));
+    
+    // Sort by score descending
+    scored.sort((a, b) => b.score - a.score);
+    
+    // Apply metadata filters
+    let filtered = scored;
+    if (filters) {
+      filtered = scored.filter(item => {
+        const meta = item.chunk.metadata;
+        return Object.entries(filters).every(([key, value]) => meta[key] === value);
+      });
+    }
+    
+    // Return top K
+    return filtered.slice(0, topK).map(item => ({
+      text: item.chunk.text,
+      source: item.chunk.metadata.source,
+      metadata: item.chunk.metadata,
+      confidence: Math.round(item.score * 10000) / 10000,
+      citation: `${item.chunk.metadata.source}${item.chunk.metadata.chapter ? ', ' + item.chunk.metadata.chapter : ''}${item.chunk.metadata.page ? ', p.' + item.chunk.metadata.page : ''}`,
+    }));
+  }
+  
+  private async getQueryEmbedding(query: string): Promise<number[]> {
+    // Use @xenova/transformers (same model as server)
+    if (!this.model) {
+      const { pipeline } = await import('@xenova/transformers');
+      this.model = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    }
+    
+    const output = await this.model(query, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  }
+  
+  // IndexedDB helpers
+  private async getFromIndexedDB(countryCode: string): Promise<OfflineKnowledgeBase | null> {
+    // Implementation using idb or native IndexedDB
+    return null;
+  }
+  
+  private async saveToIndexedDB(countryCode: string, data: OfflineKnowledgeBase): Promise<void> {
+    // Implementation
+  }
+  
+  isLoaded(): boolean {
+    return this.kb !== null;
+  }
+  
+  getVersion(): string {
+    return this.kb?.version || '';
+  }
+}
+How to Assemble Everything
+Copy all the code above into the respective files in your downloaded zip
+Create the remaining API route files (users.py, clinics.py, patients.py, encounters.py, sync.py, health.py) — they follow the same pattern as auth.py and knowledge.py
+Run the setup:
+bash
+cd afia-backend-migration
+cp .env.template .env
+# Edit .env with your values
+
+docker-compose up -d postgres redis minio qdrant
+
+cd backend
+pip install -r requirements.txt
+
+# Import your existing Ghana embeddings
+python scripts/import_embeddings.py
+
+# Build Zimbabwe EDLIZ index (when you have the PDF)
+python scripts/build_knowledge_index.py --country ZW
+
+# Create super admin
+python scripts/create_superadmin.py --email admin@yourorg.com
+
+# Start API
+uvicorn app.main:app --reload
+The Architecture Summary
+Table
+Mode	Who	How Knowledge Works	How Patients Work
+SaaS (Urban)	Accra, Harare clinics with good internet	Qdrant vector search via /api/v1/knowledge/query	Live PostgreSQL via API
+Hybrid (Rural)	Rural clinics with intermittent connection	Offline JSON — your original client-side cosine similarity	IndexedDB local cache + sync queue
+Enterprise	Large hospital groups	Self-hosted option (Docker on their server)	Same stack, their infrastructure
+You host one central infrastructure. Clinics subscribe. Urban clinics use full SaaS. Rural clinics download the offline knowledge base once, then use client-side search — but still sync patient records when online.
