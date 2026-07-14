@@ -151,6 +151,14 @@ class AfiaAPI {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
+        // Handle Pydantic validation errors (422) which return an array of error objects
+        if (response.status === 422 && Array.isArray(data.detail)) {
+          const errorMessages = data.detail.map((err: any) => err.msg).join('; ');
+          return {
+            error: errorMessages || `HTTP ${response.status}`,
+            status: response.status,
+          };
+        }
         return {
           error: data.error || data.detail || `HTTP ${response.status}`,
           status: response.status,
@@ -475,7 +483,7 @@ class AfiaAPI {
   // =========================================================================
 
   async listClinics() {
-    return this.request('/api/v1/clinics');
+    return this.request('/api/v1/clinics/');
   }
 
   async createClinic(data: {
@@ -494,11 +502,11 @@ class AfiaAPI {
     mohcc_facility_code?: string;
     admin_email: string;
     admin_name: string;
-    admin_password: string;
+    admin_temp_password: string;
     require_staff_id?: boolean;
     require_department?: boolean;
   }) {
-    return this.request('/api/v1/clinics', {
+    return this.request('/api/v1/clinics/', {
       method: 'POST',
       body: JSON.stringify(data),
     });

@@ -53,7 +53,7 @@ export function ClinicManagement() {
     email: "",
     admin_email: "",
     admin_name: "",
-    admin_password: "",
+    admin_temp_password: "",
     require_staff_id: false,
     require_department: false
   })
@@ -100,7 +100,7 @@ export function ClinicManagement() {
           email: "",
           admin_email: "",
           admin_name: "",
-          admin_password: "",
+          admin_temp_password: "",
           require_staff_id: false,
           require_department: false
         })
@@ -292,8 +292,8 @@ export function ClinicManagement() {
                     <Input 
                       id="admin-password"
                       type="password"
-                      value={createForm.admin_password}
-                      onChange={(e) => setCreateForm(prev => ({ ...prev, admin_password: e.target.value }))}
+                      value={createForm.admin_temp_password}
+                      onChange={(e) => setCreateForm(prev => ({ ...prev, admin_temp_password: e.target.value }))}
                       required
                       placeholder="Min 12 characters"
                       minLength={12}
