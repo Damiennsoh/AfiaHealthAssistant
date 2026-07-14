@@ -2,7 +2,7 @@
 // Uses raw IndexedDB for full control over stores and indexes
 
 const DB_NAME = "afia-health-db";
-const DB_VERSION = 4; // Updated for user accounts support
+const DB_VERSION = 5; // Updated to fix missing object stores (aiRequests, uploads)
 
 export interface Patient {
   id: string;

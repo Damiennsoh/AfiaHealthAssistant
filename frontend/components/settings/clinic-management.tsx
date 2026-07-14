@@ -43,6 +43,26 @@ export function ClinicManagement() {
   const [error, setError] = useState<string | null>(null)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+
+  const validatePassword = (password: string): string | null => {
+    if (password.length < 8) {
+      return "Password must be at least 8 characters"
+    }
+    if (!/[A-Z]/.test(password)) {
+      return "Password must contain at least one uppercase letter"
+    }
+    if (!/[a-z]/.test(password)) {
+      return "Password must contain at least one lowercase letter"
+    }
+    if (!/\d/.test(password)) {
+      return "Password must contain at least one digit"
+    }
+    if (!/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)) {
+      return "Password must contain at least one special character"
+    }
+    return null
+  }
   const [createForm, setCreateForm] = useState({
     name: "",
     code: "",
@@ -84,6 +104,15 @@ export function ClinicManagement() {
     e.preventDefault()
     setIsLoading(true)
     setError(null)
+    setPasswordError(null)
+
+    // Validate password before submission
+    const passwordValidationError = validatePassword(createForm.admin_temp_password)
+    if (passwordValidationError) {
+      setPasswordError(passwordValidationError)
+      setIsLoading(false)
+      return
+    }
     try {
       // 1. Sanitize the payload: Force code to uppercase, convert empty strings to undefined
       const sanitizedForm = {
@@ -333,9 +362,13 @@ export function ClinicManagement() {
                         id="admin-password"
                         type={showPassword ? "text" : "password"}
                         value={createForm.admin_temp_password}
-                        onChange={(e) => setCreateForm(prev => ({ ...prev, admin_temp_password: e.target.value }))}
+                        onChange={(e) => {
+                          const password = e.target.value
+                          setCreateForm(prev => ({ ...prev, admin_temp_password: password }))
+                          setPasswordError(validatePassword(password))
+                        }}
                         required
-                        placeholder="Min 8 characters"
+                        placeholder="Min 8 characters, uppercase, lowercase, digit, special"
                         minLength={8}
                         className="pr-10"
                       />
@@ -347,6 +380,9 @@ export function ClinicManagement() {
                         {showPassword ? "Hide" : "Show"}
                       </button>
                     </div>
+                    {passwordError && (
+                      <p className="text-[10px] text-red-500">{passwordError}</p>
+                    )}
                     <p className="text-[10px] text-slate-500">Admin will be prompted to change on first login</p>
                   </div>
                 </div>
