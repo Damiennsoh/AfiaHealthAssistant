@@ -82,8 +82,8 @@ class AuthService:
             )
             raise AuthenticationError("Invalid credentials")
         
-        # Validate staff_id if required by the clinic
-        if clinic.require_staff_id:
+        # Validate staff_id if required by the clinic (only for non-super_admin users)
+        if clinic and clinic.require_staff_id:
             if not login_data.staff_id:
                 security_logger.warning(
                     "Login failed: staff_id required",
@@ -100,8 +100,8 @@ class AuthService:
                 )
                 raise AuthenticationError("Invalid credentials")
         
-        # Validate department if required by the clinic
-        if clinic.require_department:
+        # Validate department if required by the clinic (only for non-super_admin users)
+        if clinic and clinic.require_department:
             if not login_data.department:
                 security_logger.warning(
                     "Login failed: department required",
