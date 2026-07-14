@@ -196,22 +196,23 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in=480,  # 8 hours
-            user=UserResponse(
-                id=user.id,
-                email=user.email,
-                name=user.name,
-                phone=user.phone,
-                role=user.role,
-                is_active=user.is_active,
-                clinic_id=user.clinic_id,
-                country_code=country_code,
-                staff_id=user.staff_id,
-                department=user.department,
-                last_login=user.last_login,
-                is_verified=user.is_verified,
-                created_at=user.created_at,
-                permissions=["*"] if user.can("*") else []
-            )
+            user={
+                "id": str(user.id),
+                "email": user.email,
+                "full_name": user.name,
+                "name": user.name,
+                "phone": user.phone,
+                "role": user.role.value,
+                "is_active": user.is_active,
+                "clinic_id": str(user.clinic_id) if user.clinic_id else None,
+                "country_code": country_code,
+                "staff_id": user.staff_id,
+                "department": user.department,
+                "last_login": user.last_login.isoformat() if user.last_login else None,
+                "is_verified": user.is_verified,
+                "created_at": user.created_at.isoformat(),
+                "permissions": ["*"] if user.can("*") else []
+            }
         )
 
     async def refresh_access_token(self, refresh_token: str) -> str:

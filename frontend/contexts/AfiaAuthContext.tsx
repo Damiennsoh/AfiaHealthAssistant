@@ -325,7 +325,7 @@ export function withAuth<P extends object>(
 
     useEffect(() => {
       if (!isLoading && !isAuthenticated) {
-        window.location.href = '/login';
+        window.location.href = '/';
       }
 
       if (!isLoading && requiredPermission && !can(requiredPermission)) {

@@ -65,19 +65,20 @@ async def get_current_user_info(
 ):
     """Get current user info."""
     country_code = current_user.clinic.country_code if current_user.clinic else "GH"
-    return UserResponse(
-        id=current_user.id,
-        email=current_user.email,
-        name=current_user.name,
-        phone=current_user.phone,
-        role=current_user.role,
-        is_active=current_user.is_active,
-        clinic_id=current_user.clinic_id,
-        country_code=country_code,
-        staff_id=current_user.staff_id,
-        department=current_user.department,
-        last_login=current_user.last_login,
-        is_verified=current_user.is_verified,
-        created_at=current_user.created_at,
-        permissions=["*"] if current_user.can("*") else []
-    )
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "full_name": current_user.name,
+        "name": current_user.name,
+        "phone": current_user.phone,
+        "role": current_user.role.value,
+        "is_active": current_user.is_active,
+        "clinic_id": str(current_user.clinic_id) if current_user.clinic_id else None,
+        "country_code": country_code,
+        "staff_id": current_user.staff_id,
+        "department": current_user.department,
+        "last_login": current_user.last_login.isoformat() if current_user.last_login else None,
+        "is_verified": current_user.is_verified,
+        "created_at": current_user.created_at.isoformat(),
+        "permissions": ["*"] if current_user.can("*") else []
+    }
