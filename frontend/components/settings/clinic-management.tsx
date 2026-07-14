@@ -42,6 +42,7 @@ export function ClinicManagement() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const [createForm, setCreateForm] = useState({
     name: "",
     code: "",
@@ -327,15 +328,25 @@ export function ClinicManagement() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="admin-password">Initial Password</Label>
-                    <Input 
-                      id="admin-password"
-                      type="password"
-                      value={createForm.admin_temp_password}
-                      onChange={(e) => setCreateForm(prev => ({ ...prev, admin_temp_password: e.target.value }))}
-                      required
-                      placeholder="Min 12 characters"
-                      minLength={12}
-                    />
+                    <div className="relative">
+                      <Input
+                        id="admin-password"
+                        type={showPassword ? "text" : "password"}
+                        value={createForm.admin_temp_password}
+                        onChange={(e) => setCreateForm(prev => ({ ...prev, admin_temp_password: e.target.value }))}
+                        required
+                        placeholder="Min 8 characters"
+                        minLength={8}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 text-sm"
+                      >
+                        {showPassword ? "Hide" : "Show"}
+                      </button>
+                    </div>
                     <p className="text-[10px] text-slate-500">Admin will be prompted to change on first login</p>
                   </div>
                 </div>

@@ -136,8 +136,8 @@ def validate_password_policy(password: str) -> tuple[bool, Optional[str]]:
 
     Returns: (is_valid, error_message)
     """
-    if len(password) < 12:
-        return False, "Password must be at least 12 characters long"
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long"
 
     if not any(c.isupper() for c in password):
         return False, "Password must contain at least one uppercase letter"
