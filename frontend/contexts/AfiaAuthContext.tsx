@@ -157,6 +157,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(response.error);
       }
 
+      if (!response.data) {
+        throw new Error('Login failed: No user data returned from server');
+      }
+
       if (response.data) {
         const userData: User = {
           id: response.data.user.id,
