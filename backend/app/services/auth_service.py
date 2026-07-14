@@ -34,6 +34,25 @@ class AuthService:
     async def authenticate(self, login_data: LoginRequest) -> TokenResponse:
         """Authenticate user and return JWT tokens.
 
+        AUTHENTICATION HIERARCHY:
+        1. Super Admin: Only needs email + password. Has global access to all countries/clinics.
+           - Role: super_admin
+           - clinic_id: None (optional, ignored)
+           - staff_id: Not required
+           - department: Not required
+        
+        2. Clinic Admin: Needs email + password + clinic selection.
+           - Role: clinic_admin
+           - clinic_id: Required (defines country context)
+           - staff_id: Optional (depends on clinic.require_staff_id)
+           - department: Optional (depends on clinic.require_department)
+        
+        3. Health Staff: Needs email + password + clinic + optional identifiers.
+           - Role: staff
+           - clinic_id: Required
+           - staff_id: Conditionally required by clinic
+           - department: Conditionally required by clinic
+
         NO self-registration. Accounts must be created by admin.
         Validates clinic, staff_id, and department as required by the clinic.
         """
