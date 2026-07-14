@@ -85,7 +85,8 @@ export function ClinicManagement() {
     setError(null)
     try {
       const response = await afiaAPI.createClinic({
-        ...createForm
+        ...createForm,
+        tier: "BASIC" // Default tier as required by backend
       })
       if (!response.error) {
         toast.success("Clinic created successfully")
@@ -107,10 +108,31 @@ export function ClinicManagement() {
         setIsCreateDialogOpen(false)
         await loadClinics()
       } else {
-        setError(response.error)
+        // Handle Pydantic validation errors (array of error objects)
+        if (Array.isArray(response.error)) {
+          const messages = response.error.map((e: any) => `${e.loc?.join('.') || 'field'}: ${e.msg}`).join('; ')
+          setError(messages)
+        } else if (typeof response.error === 'string') {
+          setError(response.error)
+        } else {
+          setError("Failed to create clinic")
+        }
       }
-    } catch (err) {
-      setError("Failed to create clinic")
+    } catch (err: any) {
+      // Handle network errors or other exceptions
+      if (err?.response?.data?.detail) {
+        const backendError = err.response.data.detail
+        if (Array.isArray(backendError)) {
+          const messages = backendError.map((e: any) => `${e.loc?.join('.') || 'field'}: ${e.msg}`).join('; ')
+          setError(messages)
+        } else if (typeof backendError === 'string') {
+          setError(backendError)
+        } else {
+          setError(err.message || "An unexpected error occurred")
+        }
+      } else {
+        setError(err.message || "Failed to create clinic")
+      }
     } finally {
       setIsLoading(false)
     }
