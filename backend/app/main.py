@@ -144,6 +144,17 @@ async def add_request_timing_and_security_headers(request: Request, call_next):
 # Exception handler for custom exceptions
 @app.exception_handler(AfiaException)
 async def afia_exception_handler(request: Request, exc: AfiaException):
+    # Extract the origin header from the request
+    origin = request.headers.get("origin")
+
+    # Define custom headers with fallback safety
+    response_headers = {**(exc.headers or {})}
+
+    # If the request came from an origin in your CORS settings, append it
+    if origin in settings.cors_origins_list:
+        response_headers["Access-Control-Allow-Origin"] = origin
+        response_headers["Access-Control-Allow-Credentials"] = "true"
+
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -151,7 +162,7 @@ async def afia_exception_handler(request: Request, exc: AfiaException):
             "status_code": exc.status_code,
             "path": str(request.url.path),
         },
-        headers=exc.headers
+        headers=response_headers
     )
 
 # API Routes
