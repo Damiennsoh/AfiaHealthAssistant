@@ -69,6 +69,7 @@ async def list_clinics(
     """List all clinics (super_admin only)."""
     from sqlalchemy import select, func
     from app.models.clinic import Clinic
+    from app.models.patient import Patient
 
     result = await db.execute(select(Clinic))
     clinics = result.scalars().all()
@@ -77,7 +78,7 @@ async def list_clinics(
     responses = []
     for clinic in clinics:
         user_count = await db.execute(select(func.count()).select_from(User).where(User.clinic_id == clinic.id))
-        patient_count = await db.execute(select(func.count()).select_from("patients").where("patients.clinic_id" == clinic.id))
+        patient_count = await db.execute(select(func.count()).select_from(Patient).where(Patient.clinic_id == clinic.id))
 
         resp = ClinicResponse.model_validate(clinic)
         resp.user_count = user_count.scalar()
