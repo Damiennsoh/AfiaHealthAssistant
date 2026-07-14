@@ -1,7 +1,6 @@
 import React from "react"
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
-import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/toaster'
 import { AuthProvider } from '@/contexts/AfiaAuthContext'
 import { SyncProvider } from '@/contexts/SyncContext'
@@ -64,7 +63,6 @@ export default function RootLayout({
             </SyncProvider>
           </AuthProvider>
           <Toaster />
-          <Analytics />
           <ServiceWorkerRegister />
         </ThemeProvider>
       </body>
