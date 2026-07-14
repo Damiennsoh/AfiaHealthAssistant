@@ -16,7 +16,11 @@ export default function AuthPage() {
   }
 
   const handleLoginSuccess = () => {
-    window.location.href = "/"
+    console.log('[v0] Login success callback - redirecting to dashboard');
+    // Small delay to allow React state to fully update before navigation
+    setTimeout(() => {
+      window.location.href = "/";
+    }, 100);
   }
 
   return (

@@ -158,6 +158,13 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
 
   return (
     <div className="space-y-5">
+      {/* Error Alert - Always visible at top */}
+      {error && (
+        <Alert variant="destructive" className="bg-red-50 border-red-200 text-red-800 sticky top-0 z-50 animate-in fade-in">
+          <AlertDescription className="font-medium">{error}</AlertDescription>
+        </Alert>
+      )}
+
       {/* Offline Warning */}
       {isOffline && (
         <Alert variant="destructive" className="bg-yellow-50 border-yellow-200 text-yellow-800">
@@ -165,12 +172,6 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
           <AlertDescription>
             You are currently offline. Login requires internet connection to authenticate with the server.
           </AlertDescription>
-        </Alert>
-      )}
-      
-      {error && (
-        <Alert variant="destructive" className="bg-red-50 border-red-200 text-red-800">
-          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
