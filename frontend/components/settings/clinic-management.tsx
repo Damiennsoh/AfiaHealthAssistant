@@ -94,7 +94,7 @@ export function ClinicManagement() {
         address: createForm.address.trim() || undefined,
         phone: createForm.phone.trim() || undefined,
         email: createForm.email.trim() || undefined,
-        tier: "BASIC"
+        // tier field removed - subscription disabled for now
       }
 
       const response = await afiaAPI.createClinic(sanitizedForm)

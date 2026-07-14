@@ -29,7 +29,8 @@ class ClinicCreate(ClinicBase):
     admin_email: str = Field(..., pattern=r"^[\w\.-]+@[\w\.-]+\.[a-zA-Z]{2,}$")
     admin_name: str = Field(..., min_length=2, max_length=255)
     admin_temp_password: str = Field(..., min_length=8, max_length=128)
-    tier: SubscriptionTier = SubscriptionTier.BASIC
+    # Subscription tier - disabled for now, will be implemented later
+    # tier: SubscriptionTier = SubscriptionTier.BASIC
     require_staff_id: bool = False
     require_department: bool = False
 

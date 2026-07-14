@@ -100,6 +100,8 @@ async def create_clinic(
     from app.core.security import get_password_hash
 
     # Create clinic
+    # Subscription tier disabled for now - will be implemented later
+    from app.models.clinic import SubscriptionTier
     clinic = Clinic(
         name=data.name,
         code=data.code.upper(),
@@ -109,7 +111,7 @@ async def create_clinic(
         address=data.address,
         phone=data.phone,
         email=data.email,
-        tier=data.tier,
+        tier=SubscriptionTier.BASIC,  # Default tier since field is disabled
         status=SubscriptionStatus.TRIAL,
         trial_ends_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc) + __import__("datetime").timedelta(days=30),
         require_staff_id=data.require_staff_id,
