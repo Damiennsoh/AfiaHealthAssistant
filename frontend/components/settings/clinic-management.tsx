@@ -84,10 +84,20 @@ export function ClinicManagement() {
     setIsLoading(true)
     setError(null)
     try {
-      const response = await afiaAPI.createClinic({
+      // 1. Sanitize the payload: Force code to uppercase, convert empty strings to undefined
+      const sanitizedForm = {
         ...createForm,
-        tier: "BASIC" // Default tier as required by backend
-      })
+        code: createForm.code.toUpperCase().trim(),
+        region: createForm.region.trim() || undefined,
+        district: createForm.district.trim() || undefined,
+        address: createForm.address.trim() || undefined,
+        phone: createForm.phone.trim() || undefined,
+        email: createForm.email.trim() || undefined,
+        tier: "BASIC"
+      }
+
+      const response = await afiaAPI.createClinic(sanitizedForm)
+
       if (!response.error) {
         toast.success("Clinic created successfully")
         setCreateForm({
@@ -108,27 +118,33 @@ export function ClinicManagement() {
         setIsCreateDialogOpen(false)
         await loadClinics()
       } else {
-        // Handle Pydantic validation errors (array of error objects)
+        // Handle custom format errors returned inside response
         if (Array.isArray(response.error)) {
           const messages = response.error.map((e: any) => `${e.loc?.join('.') || 'field'}: ${e.msg}`).join('; ')
           setError(messages)
-        } else if (typeof response.error === 'string') {
-          setError(response.error)
+        } else if (typeof response.error === 'object' && response.error !== null) {
+          setError(JSON.stringify(response.error))
         } else {
-          setError("Failed to create clinic")
+          setError(String(response.error || "Failed to create clinic"))
         }
       }
     } catch (err: any) {
-      // Handle network errors or other exceptions
+      // 2. Safe error catching to prevent React Error #31
       if (err?.response?.data?.detail) {
         const backendError = err.response.data.detail
         if (Array.isArray(backendError)) {
-          const messages = backendError.map((e: any) => `${e.loc?.join('.') || 'field'}: ${e.msg}`).join('; ')
+          const messages = backendError.map((e: any) => {
+            // Get the field name (last element in location array)
+            const field = e.loc && e.loc.length > 0 ? e.loc[e.loc.length - 1] : 'field';
+            return `${field}: ${e.msg}`;
+          }).join('; ')
           setError(messages)
-        } else if (typeof backendError === 'string') {
-          setError(backendError)
+        } else if (typeof backendError === 'object' && backendError !== null) {
+          // If the error is a single object, format it safely
+          const message = backendError.msg || backendError.detail || JSON.stringify(backendError)
+          setError(message)
         } else {
-          setError(err.message || "An unexpected error occurred")
+          setError(String(backendError))
         }
       } else {
         setError(err.message || "Failed to create clinic")
@@ -192,10 +208,10 @@ export function ClinicManagement() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="code">Clinic Code</Label>
-                  <Input 
+                  <Input
                     id="code"
                     value={createForm.code}
-                    onChange={(e) => setCreateForm(prev => ({ ...prev, code: e.target.value }))}
+                    onChange={(e) => setCreateForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
                     required
                     placeholder="Unique facility code (uppercase)"
                   />
