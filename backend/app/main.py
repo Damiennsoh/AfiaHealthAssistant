@@ -48,7 +48,6 @@ app = FastAPI(
     description="SaaS + Hybrid Offline Medical Knowledge System",
     version="2.0.0",
     lifespan=lifespan,
-    redirect_slashes=False,
     docs_url="/api/docs" if settings.debug else None,
     redoc_url="/api/redoc" if settings.debug else None,
     openapi_url="/api/openapi.json" if settings.debug else None,
