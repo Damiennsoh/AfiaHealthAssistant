@@ -80,9 +80,6 @@ async def init_db():
         
         if not existing:
             # Create super admin from environment variables
-            from app.core.config import get_settings
-            settings = get_settings()
-            
             admin_email = getattr(settings, 'admin_email', 'admin@afia.health')
             admin_name = getattr(settings, 'admin_name', 'admin')
             admin_password = getattr(settings, 'admin_password', 'Admin1234!')
