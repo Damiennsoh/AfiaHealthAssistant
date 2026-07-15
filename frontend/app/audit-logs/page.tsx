@@ -105,14 +105,14 @@ export default function AuditLogsPage() {
       })
       
       if (resetOffset) {
-        setLogs(response.data || [])
+        setLogs((response.data as AuditLog[]) || [])
         setOffset(0)
       } else {
-        setLogs(prev => [...prev, ...(response.data || [])])
+        setLogs(prev => [...prev, ...((response.data as AuditLog[]) || [])])
       }
       
-      setHasMore((response.data?.length || 0) === 50)
-      setOffset(currentOffset + (response.data?.length || 0))
+      setHasMore(((response.data as AuditLog[])?.length || 0) === 50)
+      setOffset(currentOffset + ((response.data as AuditLog[])?.length || 0))
     } catch (err: any) {
       setError(err.message || "Failed to load audit logs")
       toast.error("Failed to load audit logs")
