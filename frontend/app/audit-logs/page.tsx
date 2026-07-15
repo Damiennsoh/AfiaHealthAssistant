@@ -124,7 +124,6 @@ export default function AuditLogsPage() {
   const handleExport = async () => {
     try {
       await afiaAPI.exportAuditLogs({
-        search: search || undefined,
         action: action || undefined,
         start_date: startDate || undefined,
         end_date: endDate || undefined,
