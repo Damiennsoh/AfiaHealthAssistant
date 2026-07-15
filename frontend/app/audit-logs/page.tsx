@@ -105,14 +105,14 @@ export default function AuditLogsPage() {
       })
       
       if (resetOffset) {
-        setLogs(response)
+        setLogs(response.data || [])
         setOffset(0)
       } else {
-        setLogs(prev => [...prev, ...response])
+        setLogs(prev => [...prev, ...(response.data || [])])
       }
       
-      setHasMore(response.length === 50)
-      setOffset(currentOffset + response.length)
+      setHasMore((response.data?.length || 0) === 50)
+      setOffset(currentOffset + (response.data?.length || 0))
     } catch (err: any) {
       setError(err.message || "Failed to load audit logs")
       toast.error("Failed to load audit logs")
