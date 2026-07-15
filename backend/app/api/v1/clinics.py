@@ -128,6 +128,8 @@ async def create_clinic(
         clinic_id=clinic.id,
         hashed_password=get_password_hash(data.admin_temp_password),
         is_active=True,
+        staff_id=data.admin_staff_id if data.require_staff_id else None,
+        department=data.admin_department if data.require_department else None,
     )
     db.add(admin)
 
@@ -168,6 +170,8 @@ async def update_clinic(
     """Update clinic."""
     from sqlalchemy import select
     from app.models.clinic import Clinic
+    from app.services.audit_service import AuditService
+    from app.models.audit import AuditAction
 
     if current_user.role == UserRole.CLINIC_ADMIN and current_user.clinic_id != clinic_id:
         raise HTTPException(status_code=403, detail="Cannot update other clinics")
@@ -177,8 +181,168 @@ async def update_clinic(
     if not clinic:
         raise HTTPException(status_code=404, detail="Clinic not found")
 
+    # Track changes for audit log
+    changes = {}
     for field, value in data.model_dump(exclude_unset=True).items():
+        old_value = getattr(clinic, field)
+        if old_value != value:
+            changes[field] = {"old": old_value, "new": value}
         setattr(clinic, field, value)
 
     await db.commit()
+
+    # Log clinic update if there were changes
+    if changes:
+        audit_service = AuditService(db)
+        await audit_service.log(
+            action=AuditAction.CLINIC_UPDATED,
+            user=current_user,
+            clinic=clinic,
+            resource_type="clinic",
+            resource_id=str(clinic.id),
+            details={"changes": changes}
+        )
+
     return ClinicResponse.model_validate(clinic)
+
+
+@router.post("/{clinic_id}/suspend", response_model=ClinicResponse)
+async def suspend_clinic(
+    clinic_id: UUID,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Suspend clinic (reversible by superadmin)."""
+    from sqlalchemy import select
+    from app.models.clinic import Clinic
+    from app.services.audit_service import AuditService
+    from app.models.audit import AuditAction
+
+    result = await db.execute(select(Clinic).where(Clinic.id == clinic_id))
+    clinic = result.scalar_one_or_none()
+    if not clinic:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    clinic.suspend(current_user.id)
+    await db.commit()
+
+    # Log suspension
+    audit_service = AuditService(db)
+    await audit_service.log(
+        action=AuditAction.CLINIC_SUSPENDED,
+        user=current_user,
+        clinic=clinic,
+        resource_type="clinic",
+        resource_id=str(clinic.id),
+        details={"suspended_by": current_user.email}
+    )
+
+    return ClinicResponse.model_validate(clinic)
+
+
+@router.post("/{clinic_id}/unsuspend", response_model=ClinicResponse)
+async def unsuspend_clinic(
+    clinic_id: UUID,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unsuspend clinic (reactivate)."""
+    from sqlalchemy import select
+    from app.models.clinic import Clinic
+    from app.services.audit_service import AuditService
+    from app.models.audit import AuditAction
+
+    result = await db.execute(select(Clinic).where(Clinic.id == clinic_id))
+    clinic = result.scalar_one_or_none()
+    if not clinic:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    clinic.unsuspend()
+    await db.commit()
+
+    # Log unsuspension
+    audit_service = AuditService(db)
+    await audit_service.log(
+        action=AuditAction.CLINIC_UNSUSPENDED,
+        user=current_user,
+        clinic=clinic,
+        resource_type="clinic",
+        resource_id=str(clinic.id),
+        details={"unsuspended_by": current_user.email}
+    )
+
+    return ClinicResponse.model_validate(clinic)
+
+
+@router.post("/{clinic_id}/archive", response_model=ClinicResponse)
+async def archive_clinic(
+    clinic_id: UUID,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Archive clinic (soft delete)."""
+    from sqlalchemy import select
+    from app.models.clinic import Clinic
+    from app.services.audit_service import AuditService
+    from app.models.audit import AuditAction
+
+    result = await db.execute(select(Clinic).where(Clinic.id == clinic_id))
+    clinic = result.scalar_one_or_none()
+    if not clinic:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    clinic.archive(current_user.id)
+    await db.commit()
+
+    # Log archival
+    audit_service = AuditService(db)
+    await audit_service.log(
+        action=AuditAction.CLINIC_ARCHIVED,
+        user=current_user,
+        clinic=clinic,
+        resource_type="clinic",
+        resource_id=str(clinic.id),
+        details={"archived_by": current_user.email}
+    )
+
+    return ClinicResponse.model_validate(clinic)
+
+
+@router.delete("/{clinic_id}")
+async def delete_clinic(
+    clinic_id: UUID,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete clinic (hard delete - only for demo clinics)."""
+    from sqlalchemy import select
+    from app.models.clinic import Clinic
+    from app.services.audit_service import AuditService
+    from app.models.audit import AuditAction
+
+    result = await db.execute(select(Clinic).where(Clinic.id == clinic_id))
+    clinic = result.scalar_one_or_none()
+    if not clinic:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    if not clinic.is_demo_clinic:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot hard delete non-demo clinics. Use archive endpoint instead."
+        )
+
+    # Log deletion before actual deletion
+    audit_service = AuditService(db)
+    await audit_service.log(
+        action=AuditAction.CLINIC_DELETED,
+        user=current_user,
+        clinic=clinic,
+        resource_type="clinic",
+        resource_id=str(clinic.id),
+        details={"deleted_by": current_user.email, "was_demo_clinic": True}
+    )
+
+    await db.delete(clinic)
+    await db.commit()
+
+    return {"message": "Clinic deleted successfully"}

@@ -5,7 +5,7 @@ Admin-provisioned CRUD. No self-registration.
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends, Body, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -95,3 +95,60 @@ async def reset_password(
     auth_service = AuthService(db)
     await auth_service.admin_reset_password(current_user, user_id, data.new_password)
     return {"success": True}
+
+
+@router.put("/me/profile")
+async def update_own_profile(
+    profile_data: dict,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update own profile (clinic admin only).
+    Allows updating: email, phone, and clinic details (name, email, phone).
+    """
+    if current_user.role != UserRole.CLINIC_ADMIN:
+        raise HTTPException(status_code=403, detail="Only clinic admins can update their profile")
+    
+    from sqlalchemy import select
+    from app.models.clinic import Clinic
+    from app.services.audit_service import AuditService
+    from app.models.audit import AuditAction
+    
+    # Update user fields
+    if "email" in profile_data:
+        current_user.email = profile_data["email"]
+    if "phone" in profile_data:
+        current_user.phone = profile_data["phone"]
+    
+    # Update clinic fields if clinic admin
+    if current_user.clinic_id:
+        result = await db.execute(select(Clinic).where(Clinic.id == current_user.clinic_id))
+        clinic = result.scalar_one_or_none()
+        if clinic:
+            clinic_changes = {}
+            if "clinic_name" in profile_data and clinic.name != profile_data["clinic_name"]:
+                clinic_changes["name"] = {"old": clinic.name, "new": profile_data["clinic_name"]}
+                clinic.name = profile_data["clinic_name"]
+            if "clinic_email" in profile_data and clinic.email != profile_data["clinic_email"]:
+                clinic_changes["email"] = {"old": clinic.email, "new": profile_data["clinic_email"]}
+                clinic.email = profile_data["clinic_email"]
+            if "clinic_phone" in profile_data and clinic.phone != profile_data["clinic_phone"]:
+                clinic_changes["phone"] = {"old": clinic.phone, "new": profile_data["clinic_phone"]}
+                clinic.phone = profile_data["clinic_phone"]
+            
+            # Log clinic updates
+            if clinic_changes:
+                audit_service = AuditService(db)
+                await audit_service.log(
+                    action=AuditAction.CLINIC_UPDATED,
+                    user=current_user,
+                    clinic=clinic,
+                    resource_type="clinic",
+                    resource_id=str(clinic.id),
+                    details={"changes": clinic_changes}
+                )
+    
+    await db.commit()
+    
+    return {"success": True, "message": "Profile updated successfully"}

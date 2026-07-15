@@ -10,7 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Plus, Building, Users, Activity } from "lucide-react"
+import { Loader2, Plus, Building, Users, Activity, Ban, Archive, Trash2, CheckCircle } from "lucide-react"
 import { toast } from "sonner"
 import { afiaAPI } from "@/lib/afia-api"
 import { useAuth } from "@/contexts/AfiaAuthContext"
@@ -26,6 +26,8 @@ interface Clinic {
   phone?: string
   email?: string
   is_active: boolean
+  is_suspended: boolean
+  is_demo_clinic: boolean
   require_staff_id: boolean
   require_department: boolean
   features: Record<string, any>
@@ -75,6 +77,8 @@ export function ClinicManagement() {
     admin_email: "",
     admin_name: "",
     admin_temp_password: "",
+    admin_staff_id: "",
+    admin_department: "",
     require_staff_id: false,
     require_department: false
   })
@@ -113,6 +117,7 @@ export function ClinicManagement() {
       setIsLoading(false)
       return
     }
+
     try {
       // 1. Sanitize the payload: Force code to uppercase, convert empty strings to undefined
       const sanitizedForm = {
@@ -126,14 +131,14 @@ export function ClinicManagement() {
         // tier field removed - subscription disabled for now
       }
 
-      const response = await afiaAPI.createClinic(sanitizedForm)
-
-      if (!response.error) {
+      const response = await afiaAPI.createClinic(sanitizedForm as any)
+      
+      if (response && !response.error) {
         toast.success("Clinic created successfully")
         setCreateForm({
           name: "",
           code: "",
-          country_code: "GH",
+          country_code: "GH" as "GH" | "ZW",
           region: "",
           district: "",
           address: "",
@@ -142,6 +147,8 @@ export function ClinicManagement() {
           admin_email: "",
           admin_name: "",
           admin_temp_password: "",
+          admin_staff_id: "",
+          admin_department: "",
           require_staff_id: false,
           require_department: false
         })
@@ -181,6 +188,63 @@ export function ClinicManagement() {
       }
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleSuspendClinic = async (clinicId: string) => {
+    if (!confirm("Are you sure you want to suspend this clinic? This will disable access for all users.")) {
+      return
+    }
+    
+    try {
+      await afiaAPI.suspendClinic(clinicId)
+      toast.success("Clinic suspended successfully")
+      await loadClinics()
+    } catch (err: any) {
+      toast.error("Failed to suspend clinic")
+    }
+  }
+
+  const handleUnsuspendClinic = async (clinicId: string) => {
+    try {
+      await afiaAPI.unsuspendClinic(clinicId)
+      toast.success("Clinic unsuspended successfully")
+      await loadClinics()
+    } catch (err: any) {
+      toast.error("Failed to unsuspend clinic")
+    }
+  }
+
+  const handleArchiveClinic = async (clinicId: string) => {
+    if (!confirm("Are you sure you want to archive this clinic? This will soft-delete the clinic and all its data.")) {
+      return
+    }
+    
+    try {
+      await afiaAPI.archiveClinic(clinicId)
+      toast.success("Clinic archived successfully")
+      await loadClinics()
+    } catch (err: any) {
+      toast.error("Failed to archive clinic")
+    }
+  }
+
+  const handleDeleteClinic = async (clinicId: string, isDemo: boolean) => {
+    if (!isDemo) {
+      toast.error("Only demo clinics can be deleted. Use archive for regular clinics.")
+      return
+    }
+    
+    if (!confirm("Are you sure you want to permanently delete this demo clinic? This action cannot be undone.")) {
+      return
+    }
+    
+    try {
+      await afiaAPI.deleteClinic(clinicId)
+      toast.success("Demo clinic deleted successfully")
+      await loadClinics()
+    } catch (err: any) {
+      toast.error("Failed to delete clinic")
     }
   }
 
@@ -370,22 +434,42 @@ export function ClinicManagement() {
                         required
                         placeholder="Min 8 characters, uppercase, lowercase, digit, special"
                         minLength={8}
-                        className="pr-10"
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 text-sm"
-                      >
-                        {showPassword ? "Hide" : "Show"}
-                      </button>
                     </div>
                     {passwordError && (
-                      <p className="text-[10px] text-red-500">{passwordError}</p>
+                      <p className="text-xs text-red-500">{passwordError}</p>
                     )}
-                    <p className="text-[10px] text-slate-500">Admin will be prompted to change on first login</p>
                   </div>
                 </div>
+
+                {/* Conditional fields based on requirements */}
+                {createForm.require_staff_id && (
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-staff-id">Admin Staff ID</Label>
+                    <Input
+                      id="admin-staff-id"
+                      value={createForm.admin_staff_id}
+                      onChange={(e) => setCreateForm(prev => ({ ...prev, admin_staff_id: e.target.value }))}
+                      required={createForm.require_staff_id}
+                      placeholder="Staff ID for authentication"
+                    />
+                    <p className="text-[10px] text-slate-500">Required when Staff ID is enforced for this clinic</p>
+                  </div>
+                )}
+
+                {createForm.require_department && (
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-department">Admin Department</Label>
+                    <Input
+                      id="admin-department"
+                      value={createForm.admin_department}
+                      onChange={(e) => setCreateForm(prev => ({ ...prev, admin_department: e.target.value }))}
+                      required={createForm.require_department}
+                      placeholder="Department (e.g., OPD, Pharmacy, Laboratory)"
+                    />
+                    <p className="text-[10px] text-slate-500">Required when Department is enforced for this clinic</p>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-3 pt-4">
@@ -435,6 +519,7 @@ export function ClinicManagement() {
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Users</TableHead>
                   <TableHead className="text-right">Patients</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -445,10 +530,20 @@ export function ClinicManagement() {
                     <TableCell>{clinic.country_code}</TableCell>
                     <TableCell>
                       <Badge 
-                        variant={clinic.is_active ? "default" : "secondary"}
-                        className={clinic.is_active ? "bg-emerald-600" : "bg-slate-400"}
+                        variant={clinic.is_active && !clinic.is_suspended ? "default" : "secondary"}
+                        className={
+                          clinic.is_suspended 
+                            ? "bg-yellow-500" 
+                            : clinic.is_active 
+                              ? "bg-emerald-600" 
+                              : "bg-slate-400"
+                        }
                       >
-                        {clinic.is_active ? "Active" : "Inactive"}
+                        {clinic.is_suspended 
+                          ? "Suspended" 
+                          : clinic.is_active 
+                            ? "Active" 
+                            : "Inactive"}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
@@ -461,6 +556,51 @@ export function ClinicManagement() {
                       <div className="flex items-center justify-end gap-1">
                         <Activity className="h-3 w-3 text-slate-500" />
                         {clinic.patient_count}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {clinic.is_suspended ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleUnsuspendClinic(clinic.id)}
+                            className="h-8 px-2"
+                          >
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Unsuspend
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSuspendClinic(clinic.id)}
+                            className="h-8 px-2"
+                          >
+                            <Ban className="h-4 w-4 mr-1" />
+                            Suspend
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleArchiveClinic(clinic.id)}
+                          className="h-8 px-2"
+                        >
+                          <Archive className="h-4 w-4 mr-1" />
+                          Archive
+                        </Button>
+                        {clinic.is_demo_clinic && (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleDeleteClinic(clinic.id, true)}
+                            className="h-8 px-2"
+                          >
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Delete
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

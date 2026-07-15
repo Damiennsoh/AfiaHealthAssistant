@@ -47,6 +47,12 @@ class AuditAction(str, PyEnum):
     USER_UPDATED = "user_updated"
     USER_DELETED = "user_deleted"
     CLINIC_UPDATED = "clinic_updated"
+    CLINIC_SUSPENDED = "clinic_suspended"
+    CLINIC_UNSUSPENDED = "clinic_unsuspended"
+    CLINIC_ARCHIVED = "clinic_archived"
+    CLINIC_DELETED = "clinic_deleted"
+    STAFF_ADDED = "staff_added"
+    STAFF_DELETED = "staff_deleted"
 
 
 class AuditLog(BaseModel):

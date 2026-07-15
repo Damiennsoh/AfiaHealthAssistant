@@ -16,7 +16,7 @@ from app.core.config import get_settings, Environment
 from app.core.logging import configure_logging, logger
 from app.core.exceptions import AfiaException, RateLimitError
 from app.db.session import init_db
-from app.api.v1 import auth, users, clinics, patients, encounters, knowledge, sync, health, websocket
+from app.api.v1 import auth, users, clinics, patients, encounters, knowledge, sync, health, websocket, audit
 
 settings = get_settings()
 
@@ -175,6 +175,7 @@ app.include_router(encounters.router, prefix="/api/v1/encounters", tags=["encoun
 app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
 app.include_router(sync.router, prefix="/api/v1/sync", tags=["sync"])
 app.include_router(websocket.router, prefix="/api/v1/websocket", tags=["websocket"])
+app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
 
 
 @app.get("/")

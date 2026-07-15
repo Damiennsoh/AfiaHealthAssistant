@@ -17,6 +17,7 @@ import {
   Heart,
   ChevronRight,
   ArrowLeftRight,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOnlineStatus } from "@/hooks/use-online-status";
@@ -68,6 +69,13 @@ const navItems = [
     label: "AI Queue",
     icon: Paperclip,
     description: "Queued AI requests",
+  },
+  {
+    href: "/audit-logs",
+    label: "Audit Logs",
+    icon: FileText,
+    description: "Activity tracking",
+    roles: ["super_admin", "clinic_admin"], // Only show for these roles
   },
 ];
 
@@ -165,6 +173,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* Nav */}
         <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
           {navItems.map((item) => {
+            // Check if user has permission to view this item
+            if (item.roles && user && !item.roles.includes(user.role)) {
+              return null;
+            }
+            
             const isActive =
               pathname === item.href ||
               (item.href !== "/" && pathname?.startsWith(item.href));

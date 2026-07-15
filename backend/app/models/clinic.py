@@ -75,6 +75,14 @@ class Clinic(BaseModel):
     admin_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     is_active = Column(Boolean, default=True)
 
+    # Suspension & Archival (for subscription management)
+    is_suspended = Column(Boolean, default=False)
+    suspended_at = Column(DateTime(timezone=True), nullable=True)
+    suspended_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    archived_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    is_demo_clinic = Column(Boolean, default=False)
+
     # Relationships
     users = relationship("User", foreign_keys="User.clinic_id", back_populates="clinic", cascade="all, delete-orphan")
     patients = relationship("Patient", back_populates="clinic", cascade="all, delete-orphan")
@@ -98,3 +106,29 @@ class Clinic(BaseModel):
     def can_use_offline(self) -> bool:
         """Check if clinic has offline PWA enabled."""
         return self.tier in [SubscriptionTier.PRO, SubscriptionTier.ENTERPRISE] and self.offline_enabled
+
+    def suspend(self, user_id: uuid.UUID) -> None:
+        """Suspend clinic (reversible)."""
+        self.is_suspended = True
+        self.suspended_at = datetime.now(timezone.utc)
+        self.suspended_by = user_id
+        self.is_active = False
+
+    def unsuspend(self) -> None:
+        """Unsuspend clinic (reactivate)."""
+        self.is_suspended = False
+        self.suspended_at = None
+        self.suspended_by = None
+        self.is_active = True
+
+    def archive(self, user_id: uuid.UUID) -> None:
+        """Archive clinic (soft delete)."""
+        self.archived_at = datetime.now(timezone.utc)
+        self.archived_by = user_id
+        self.is_active = False
+
+    def delete(self) -> None:
+        """Hard delete clinic (only for demo clinics)."""
+        if not self.is_demo_clinic:
+            raise ValueError("Cannot hard delete non-demo clinics. Use archive() instead.")
+        # This will cascade delete all related data

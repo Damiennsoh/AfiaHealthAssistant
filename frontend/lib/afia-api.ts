@@ -503,6 +503,8 @@ class AfiaAPI {
     admin_email: string;
     admin_name: string;
     admin_temp_password: string;
+    admin_staff_id?: string;
+    admin_department?: string;
     require_staff_id?: boolean;
     require_department?: boolean;
   }) {
@@ -535,6 +537,30 @@ class AfiaAPI {
     return this.request(`/api/v1/clinics/${clinicId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  }
+
+  async suspendClinic(clinicId: string) {
+    return this.request(`/api/v1/clinics/${clinicId}/suspend`, {
+      method: 'POST',
+    });
+  }
+
+  async unsuspendClinic(clinicId: string) {
+    return this.request(`/api/v1/clinics/${clinicId}/unsuspend`, {
+      method: 'POST',
+    });
+  }
+
+  async archiveClinic(clinicId: string) {
+    return this.request(`/api/v1/clinics/${clinicId}/archive`, {
+      method: 'POST',
+    });
+  }
+
+  async deleteClinic(clinicId: string) {
+    return this.request(`/api/v1/clinics/${clinicId}`, {
+      method: 'DELETE',
     });
   }
 
@@ -598,10 +624,79 @@ class AfiaAPI {
   }
 
   async deactivateUser(userId: string, options?: { reason?: string }) {
-    return this.request(`/api/v1/users/${userId}`, { 
+    return this.request(`/api/v1/users/${userId}`, {
       method: 'DELETE',
       body: options?.reason ? JSON.stringify({ reason: options.reason }) : undefined
     });
+  }
+
+  async updateOwnProfile(data: {
+    email?: string;
+    phone?: string;
+    clinic_name?: string;
+    clinic_email?: string;
+    clinic_phone?: string;
+  }) {
+    return this.request('/api/v1/users/me/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // =========================================================================
+  // AUDIT LOGS
+  // =========================================================================
+
+  async getAuditLogs(params?: {
+    start_date?: string;
+    end_date?: string;
+    action?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const queryParams = new URLSearchParams();
+    if (params?.start_date) queryParams.append('start_date', params.start_date);
+    if (params?.end_date) queryParams.append('end_date', params.end_date);
+    if (params?.action) queryParams.append('action', params.action);
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.offset) queryParams.append('offset', params.offset.toString());
+
+    return this.request(`/api/v1/audit/?${queryParams.toString()}`);
+  }
+
+  async exportAuditLogs(params?: {
+    start_date?: string;
+    end_date?: string;
+    action?: string;
+  }) {
+    const queryParams = new URLSearchParams();
+    if (params?.start_date) queryParams.append('start_date', params.start_date);
+    if (params?.end_date) queryParams.append('end_date', params.end_date);
+    if (params?.action) queryParams.append('action', params.action);
+
+    const response = await fetch(`${API_BASE}/api/v1/audit/export?${queryParams.toString()}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to export audit logs');
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit_logs_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   }
 
   // =========================================================================
