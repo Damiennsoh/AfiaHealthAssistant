@@ -76,7 +76,7 @@ export default function AuditLogsPage() {
   const [hasMore, setHasMore] = useState(true)
 
   // Check permissions
-  if (user?.role === "staff") {
+  if (user?.role === "healthworker") {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Card className="max-w-md">
