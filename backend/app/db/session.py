@@ -44,15 +44,34 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Initialize database tables and seed super admin if needed."""
+    """Initialize database tables using Alembic migrations and seed super admin if needed."""
     from app.models import user, clinic, patient, encounter, audit, sync  # noqa
     from app.models.user import User, UserRole
     from app.core.security import get_password_hash
     from sqlalchemy import select
+    from alembic.config import Config
+    from alembic import command
+    import asyncio
     
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables initialized")
+    # Run Alembic migrations instead of create_all
+    alembic_cfg = Config()
+    alembic_cfg.set_main_option("sqlalchemy.url", settings.async_database_url.replace("+asyncpg", ""))
+    alembic_cfg.set_main_option("script_location", "app/db/migrations")
+    
+    try:
+        # Run migrations synchronously in a separate thread
+        def run_migrations():
+            command.upgrade(alembic_cfg, "head")
+        
+        await asyncio.to_thread(run_migrations)
+        logger.info("Database migrations completed")
+    except Exception as e:
+        logger.warning(f"Migration failed, falling back to create_all: {e}")
+        # Fallback to create_all if migrations fail
+        from app.models import user, clinic, patient, encounter, audit, sync  # noqa
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables initialized via create_all fallback")
     
     # Seed super admin if not exists
     async with AsyncSessionLocal() as db:
