@@ -62,16 +62,22 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
         const response = await afiaAPI.listPublicClinics(country)
         if (response.error) {
           setError(response.error)
+          setClinics([])
         } else {
-          setClinics(response.data || [])
+          // Safely extract array from response
+          const clinicsArray = Array.isArray(response) 
+            ? response 
+            : (response.data || [])
+          setClinics(clinicsArray)
           // Auto-select first clinic if only one exists
-          if (response.data && response.data.length === 1) {
-            setSelectedClinic(response.data[0])
+          if (clinicsArray.length === 1) {
+            setSelectedClinic(clinicsArray[0])
             setStep(2)
           }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load clinics')
+        setClinics([]) // Force reset to empty array on failure
       } finally {
         setIsLoadingClinics(false)
       }
@@ -90,11 +96,17 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
           const response = await afiaAPI.listPublicClinics(country, searchQuery)
           if (response.error) {
             setError(response.error)
+            setClinics([])
           } else {
-            setClinics(response.data || [])
+            // Safely extract array from response
+            const clinicsArray = Array.isArray(response) 
+              ? response 
+              : (response.data || [])
+            setClinics(clinicsArray)
           }
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Failed to load clinics')
+          setClinics([]) // Force reset to empty array on failure
         } finally {
           setIsLoadingClinics(false)
         }
@@ -239,12 +251,12 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
                     <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
                     <span className="ml-2 text-slate-600">Loading clinics...</span>
                   </div>
-                ) : clinics.length === 0 ? (
+                ) : (clinics || []).length === 0 ? (
                   <div className="text-center p-4 text-slate-500">
                     No clinics found
                   </div>
                 ) : (
-                  clinics.map((clinic) => (
+                  (clinics || []).map((clinic) => (
                     <button
                       key={clinic.id}
                       type="button"
