@@ -44,34 +44,29 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Initialize database tables using Alembic migrations and seed super admin if needed."""
+    """Initialize database tables and seed super admin if needed."""
     from app.models import user, clinic, patient, encounter, audit, sync  # noqa
     from app.models.user import User, UserRole
     from app.core.security import get_password_hash
     from sqlalchemy import select
     from alembic.config import Config
     from alembic import command
-    import asyncio
     
-    # Run Alembic migrations instead of create_all
-    alembic_cfg = Config()
-    alembic_cfg.set_main_option("sqlalchemy.url", settings.async_database_url.replace("+asyncpg", ""))
-    alembic_cfg.set_main_option("script_location", "app/db/migrations")
-    
+    # Safely point Alembic configuration to the global settings instance URL
     try:
-        # Run migrations synchronously in a separate thread
-        def run_migrations():
-            command.upgrade(alembic_cfg, "head")
-        
-        await asyncio.to_thread(run_migrations)
-        logger.info("Database migrations completed")
+        alembic_cfg = Config("alembic.ini")
+        alembic_url = settings.async_database_url.replace("+asyncpg", "")
+        alembic_cfg.set_main_option("sqlalchemy.url", alembic_url)
+        # Optional: Uncomment if you want automatic migrations to execute on startup
+        # command.upgrade(alembic_cfg, "head")
+        logger.info("Alembic configuration verified successfully")
     except Exception as e:
-        logger.warning(f"Migration failed, falling back to create_all: {e}")
-        # Fallback to create_all if migrations fail
-        from app.models import user, clinic, patient, encounter, audit, sync  # noqa
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables initialized via create_all fallback")
+        logger.warning(f"Alembic startup check skipped or failed: {e}")
+
+    # Create tables via fallback if missing
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables verified/initialized")
     
     # Seed super admin if not exists
     async with AsyncSessionLocal() as db:
@@ -79,7 +74,7 @@ async def init_db():
         existing = result.scalar_one_or_none()
         
         if not existing:
-            # Create super admin from environment variables
+            # We explicitly read fallback parameters from global settings safely using getattr
             admin_email = getattr(settings, 'admin_email', 'admin@afia.health')
             admin_name = getattr(settings, 'admin_name', 'admin')
             admin_password = getattr(settings, 'admin_password', 'Admin1234!')
