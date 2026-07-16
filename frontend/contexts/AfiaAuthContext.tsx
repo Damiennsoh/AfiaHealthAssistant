@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import { afiaAPI } from '@/lib/afia-api'
+import { useRouter, usePathname } from 'next/navigation'
 
 // Define the Auth Context State shape
 interface AuthContextType {
@@ -274,22 +275,35 @@ export function withAuth<P extends object>(
 ) {
   return function ProtectedRoute(props: P) {
     const { user, isLoading, isAuthenticated, can } = useAuth()
+    const router = useRouter()
+    const pathname = usePathname()
 
     useEffect(() => {
-      if (!isLoading && !isAuthenticated) {
-        window.location.href = '/'
+      // CRITICAL GUARD: Only redirect if the current path is NOT the login page or root '/'
+      const isPublicPath = pathname === '/' || pathname === '/login'
+
+      if (!isLoading && !isAuthenticated && !isPublicPath) {
+        console.log(`[withAuth] Guard triggered on protected path ${pathname}. Redirecting to /`);
+        router.replace('/')
       }
 
-      if (!isLoading && requiredPermission && !can(requiredPermission)) {
-        window.location.href = '/unauthorized'
+      if (!isLoading && isAuthenticated && requiredPermission && !can(requiredPermission)) {
+        console.log(`[withAuth] Permission missing. Redirecting to /unauthorized`);
+        router.replace('/unauthorized')
       }
-    }, [isLoading, isAuthenticated, can])
+    }, [isLoading, isAuthenticated, can, pathname, router])
 
     if (isLoading) {
-      return <div>Loading...</div>
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+        </div>
+      )
     }
 
-    if (!isAuthenticated) {
+    // Allow displaying the route public view OR rendering the component if authenticated
+    const isPublicPath = pathname === '/' || pathname === '/login'
+    if (!isAuthenticated && !isPublicPath) {
       return null
     }
 

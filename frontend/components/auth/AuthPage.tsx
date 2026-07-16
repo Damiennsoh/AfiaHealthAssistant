@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Shield, Stethoscope, Activity, Lock } from "lucide-react"
 import LoginForm from "./LoginForm"
@@ -8,18 +9,19 @@ import ForgotPasswordForm from "./ForgotPasswordForm"
 import { useAuth } from "@/contexts/AfiaAuthContext"
 
 export default function AuthPage() {
-  const { isAuthenticated, isLoading } = useAuth()
+  const { isAuthenticated } = useAuth()
   const [view, setView] = useState<'login' | 'forgot_password'>('login')
+  const router = useRouter()
 
   if (isAuthenticated) {
     console.log('[AuthPage] User is authenticated, redirecting to dashboard');
-    return null // Will be handled by redirect in the layout
+    router.replace('/dashboard')
+    return null
   }
 
   const handleLoginSuccess = () => {
-    console.log('[AuthPage] Login success callback - waiting for auth state to update');
-    // Wait for auth context to finish processing the login
-    // The AuthWrapper will handle the redirect once isAuthenticated becomes true
+    console.log('[AuthPage] Login success callback - Redirecting to dashboard...');
+    router.replace('/dashboard')
   }
 
   return (
