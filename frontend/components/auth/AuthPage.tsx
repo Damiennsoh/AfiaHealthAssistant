@@ -15,13 +15,13 @@ export default function AuthPage() {
 
   if (isAuthenticated) {
     console.log('[AuthPage] User is authenticated, redirecting to dashboard');
-    router.replace('/dashboard')
+    router.replace('/')
     return null
   }
 
   const handleLoginSuccess = () => {
     console.log('[AuthPage] Login success callback - Redirecting to dashboard...');
-    router.replace('/dashboard')
+    router.replace('/')
   }
 
   return (
