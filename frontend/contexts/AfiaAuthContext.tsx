@@ -1,296 +1,199 @@
-"use client";
+"use client"
 
-/**
- * AFIA Health Assistant - Authentication Context
- * Replaces Firebase Auth with JWT-based authentication
- * No self-registration - admin-provisioned accounts only
- */
+import React, { createContext, useContext, useState, useEffect } from 'react'
+import { afiaAPI } from '@/lib/afia-api'
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { afiaAPI } from '@/lib/afia-api';
-import {
-  cacheSessionForOffline,
-  restoreOfflineSession,
-  clearOfflineSession,
-  type CachedUserProfile,
-} from '@/lib/offline-auth';
-
-interface User {
-  id: string;
-  email: string;
-  full_name: string;
-  role: 'super_admin' | 'clinic_admin' | 'healthworker' | 'viewer';
-  clinic_id?: string;
-  country_code: 'GH' | 'ZW';
-  staff_id?: string;
-  department?: string;
-  last_login?: string;
-}
-
+// Define the Auth Context State shape
 interface AuthContextType {
-  user: User | null;
-  isLoading: boolean;
-  isAuthenticated: boolean;
-  login: (email: string, password: string, clinicId?: string, staffId?: string, department?: string, role?: string) => Promise<void>;
-  logout: () => Promise<void>;
-  can: (permission: string) => boolean;
-  refreshUser: () => Promise<void>;
-  verifyAdminPassword: (password: string) => Promise<boolean>;
+  user: any | null
+  token: string | null
+  isAuthenticated: boolean
+  isLoading: boolean
+  login: (
+    email: string,
+    password: string,
+    clinicId?: string,
+    staffId?: string,
+    department?: string,
+    role?: string
+  ) => Promise<void>
+  logout: () => Promise<void>
+  can: (permission: string) => boolean
+  refreshUser: () => Promise<void>
+  verifyAdminPassword: (password: string) => Promise<boolean>
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AfiaAuthContext = createContext<AuthContextType | undefined>(undefined)
+
+// Simple local IndexedDB helper functions
+async function saveSessionToLocalDB(user: any, token: string) {
+  return new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open("afia_health_db", 1)
+
+    request.onupgradeneeded = (e: any) => {
+      const db = e.target.result
+      if (!db.objectStoreNames.contains("session")) {
+        db.createObjectStore("session", { keyPath: "id" })
+      }
+    }
+
+    request.onsuccess = (e: any) => {
+      const db = e.target.result
+      const transaction = db.transaction("session", "readwrite")
+      const store = transaction.objectStore("session")
+
+      // Store user and token under a static main key
+      const putRequest = store.put({ id: "current_session", user, token, updatedAt: Date.now() })
+
+      putRequest.onsuccess = () => resolve()
+      putRequest.onerror = () => reject(putRequest.error)
+    }
+
+    request.onerror = () => reject(request.error)
+  })
+}
+
+async function getSessionFromLocalDB() {
+  return new Promise<{ user: any; token: string } | null>((resolve, reject) => {
+    const request = indexedDB.open("afia_health_db", 1)
+
+    request.onupgradeneeded = (e: any) => {
+      const db = e.target.result
+      if (!db.objectStoreNames.contains("session")) {
+        db.createObjectStore("session", { keyPath: "id" })
+      }
+    }
+
+    request.onsuccess = (e: any) => {
+      const db = e.target.result
+      const transaction = db.transaction("session", "readonly")
+      const store = transaction.objectStore("session")
+      const getRequest = store.get("current_session")
+
+      getRequest.onsuccess = () => resolve(getRequest.result || null)
+      getRequest.onerror = () => reject(getRequest.error)
+    }
+
+    request.onerror = () => reject(request.error)
+  })
+}
+
+async function clearSessionFromLocalDB() {
+  return new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open("afia_health_db", 1)
+    request.onsuccess = (e: any) => {
+      const db = e.target.result
+      const transaction = db.transaction("session", "readwrite")
+      const store = transaction.objectStore("session")
+      const deleteRequest = store.delete("current_session")
+      deleteRequest.onsuccess = () => resolve()
+      deleteRequest.onerror = () => reject(deleteRequest.error)
+    }
+    request.onerror = () => reject(request.error)
+  })
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<any | null>(null)
+  const [token, setToken] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
-  /**
-   * Validate existing token on mount
-   */
+  // 1. ASYNC INITIALIZATION: Wait completely for IndexedDB on app mount
   useEffect(() => {
-    const initializeAuth = async () => {
-      console.log('[AuthContext] Mounting - checking for existing token');
-      const token = typeof window !== 'undefined' ? localStorage.getItem('afia_access_token') : null;
-      console.log('[AuthContext] Token found:', !!token);
-      if (token) {
-        await validateToken();
-      } else {
-        console.log('[AuthContext] No token found, setting isLoading to false');
-        setIsLoading(false);
-      }
-    };
-
-    initializeAuth();
-  }, []);
-
-  const validateToken = async () => {
-    console.log('[AuthContext] validateToken called');
-    try {
-      // ── OFFLINE PATH ──────────────────────────────────────────────────────
-      if (typeof window !== 'undefined' && !navigator.onLine) {
-        console.log('[AuthContext] Offline mode - attempting to restore session from IndexedDB');
-        // Try to restore a full session from IndexedDB offline cache
-        const email = localStorage.getItem('afia_last_email');
-        console.log('[AuthContext] Last email found:', email);
-        if (email) {
-          const cached: CachedUserProfile | null = await restoreOfflineSession(email);
-          console.log('[AuthContext] Cached session found:', !!cached);
-          if (cached) {
-            const userData: User = {
-              id: cached.id,
-              email: cached.email,
-              full_name: cached.full_name,
-              role: cached.role,
-              clinic_id: cached.clinic_id,
-              country_code: cached.country_code,
-              staff_id: cached.staff_id,
-              department: cached.department,
-            };
-            console.log('[AuthContext] Setting user from cache:', userData.email);
-            setUser(userData);
-            afiaAPI.setCountry(userData.country_code);
-            console.log('[Auth] Offline session restored from cache for:', email);
-            setIsLoading(false);
-            return;
-          }
+    async function initAuth() {
+      console.log("[AuthContext] Mounting - checking for existing token...")
+      try {
+        const localSession = await getSessionFromLocalDB()
+        if (localSession && localSession.token) {
+          console.log("[AuthContext] Token found locally!")
+          setUser(localSession.user)
+          setToken(localSession.token)
+          // Also set token in localStorage for API calls
+          localStorage.setItem('afia_access_token', localSession.token)
+        } else {
+          console.log("[AuthContext] Token found: false")
         }
-        // No cached session — user stays logged out until online
-        console.log('[AuthContext] No cached session, setting isLoading to false');
-        setIsLoading(false);
-        return;
+      } catch (err) {
+        console.error("[AuthContext] Error reading IndexedDB session:", err)
+      } finally {
+        // ONLY turn off loading once we are 100% finished querying the DB
+        setIsLoading(false)
       }
-
-      // ── ONLINE PATH ───────────────────────────────────────────────────────
-      console.log('[AuthContext] Online mode - validating token with backend');
-      const response = await afiaAPI.getCurrentUser();
-      console.log('[AuthContext] API response status:', response.status);
-      console.log('[AuthContext] API response data:', !!response.data);
-
-      if (response.data) {
-        const userData: User = {
-          id: response.data.id,
-          email: response.data.email,
-          full_name: response.data.full_name,
-          role: response.data.role as User['role'],
-          clinic_id: response.data.clinic_id,
-          country_code: (response.data.country_code || 'GH') as 'GH' | 'ZW',
-          staff_id: response.data.staff_id,
-          department: response.data.department,
-        };
-
-        console.log('[AuthContext] Setting user from API:', userData.email);
-        setUser(userData);
-
-        // Set country context for API
-        afiaAPI.setCountry(userData.country_code);
-      } else if (response.status === 401) {
-        console.log('[AuthContext] Token invalid (401), clearing tokens');
-        // Token invalid, clear
-        afiaAPI.clearTokens();
-      }
-    } catch (error) {
-      console.error('[AuthContext] Token validation failed:', error);
-      // Only clear tokens if we are sure it's not a network error
-      if (typeof window !== 'undefined' && navigator.onLine) {
-        console.log('[AuthContext] Online and error occurred, clearing tokens');
-        afiaAPI.clearTokens();
-      }
-    } finally {
-      console.log('[AuthContext] validateToken complete, setting isLoading to false');
-      setIsLoading(false);
     }
-  };
+    initAuth()
+  }, [])
 
-  /**
-   * Login with email, password, selected clinic, and optional staff_id/department/role
-   * No self-registration - accounts are admin-provisioned
-   */
-  const login = useCallback(async (email: string, password: string, clinicId?: string, staffId?: string, department?: string, role?: string) => {
-    console.log('[AuthContext] login called for:', email);
-    setIsLoading(true);
+  // 2. THE HYBRID LOGIN METHOD
+  const login = async (
+    email: string,
+    password: string,
+    clinicId?: string,
+    staffId?: string,
+    department?: string,
+    role?: string
+  ) => {
+    console.log("[AuthContext] Starting login process...")
 
-    try {
-      // ── OFFLINE LOGIN PATH ────────────────────────────────────────────────
-      if (typeof window !== 'undefined' && !navigator.onLine) {
-        console.log('[AuthContext] Offline login attempt');
-        const cached = await restoreOfflineSession(email, password);
-        console.log('[AuthContext] Offline session restored:', !!cached);
-        if (cached) {
-          const userData: User = {
-            id: cached.id,
-            email: cached.email,
-            full_name: cached.full_name,
-            role: cached.role,
-            clinic_id: cached.clinic_id,
-            country_code: cached.country_code,
-            staff_id: cached.staff_id,
-            department: cached.department,
-          };
-          console.log('[AuthContext] Setting user from offline login:', userData.email);
-          setUser(userData);
-          afiaAPI.setCountry(userData.country_code);
-          console.log('[Auth] Offline login successful for:', email);
-          setIsLoading(false);
-          return;
-        }
-        throw new Error('Offline login failed. Please ensure you have logged in online at least once on this device.');
-      }
+    // Setup login payload
+    const payload = { email, password, clinicId, staffId, department, role }
 
-      // ── ONLINE LOGIN PATH ─────────────────────────────────────────────────
-      console.log('[AuthContext] Online login attempt');
-      const response = await afiaAPI.login(email, password, clinicId, staffId, department, role);
-      console.log('[AuthContext] API login response status:', response.status);
-      console.log('[AuthContext] API login response error:', response.error);
-      console.log('[AuthContext] API login response data:', !!response.data);
+    if (navigator.onLine) {
+      console.log("[AuthContext] Device is online. Directing auth to Render API...")
 
+      // Perform online auth
+      const response = await afiaAPI.login(email, password, clinicId, staffId, department, role)
       if (response.error) {
-        throw new Error(response.error);
+        throw new Error(response.error)
       }
 
-      if (!response.data) {
-        throw new Error('Login failed: No user data returned from server');
+      const freshUser = response.data?.user
+      const freshToken = response.data?.access_token
+
+      if (!freshToken) {
+        throw new Error("Invalid API response: Missing authentication token.")
       }
 
-      if (response.data) {
-        console.log('[AuthContext] Login successful, processing user data');
-        const userData: User = {
-          id: response.data.user.id,
-          email: response.data.user.email,
-          full_name: response.data.user.name || response.data.user.email,
-          role: response.data.user.role as User['role'],
-          clinic_id: response.data.user.clinic_id,
-          country_code: (response.data.user.country_code || 'GH') as 'GH' | 'ZW',
-          staff_id: response.data.user.staff_id,
-          department: response.data.user.department,
-        };
+      // CRITICAL: We must AWAIT the IndexedDB write before touching React state
+      console.log("[AuthContext] Online auth success. Caching credentials asynchronously to IndexedDB...")
+      await saveSessionToLocalDB(freshUser, freshToken)
+      console.log("[AuthContext] IndexedDB caching complete.")
 
-        // Remember email for offline session restoration on next visit
-        localStorage.setItem('afia_last_email', email.toLowerCase());
+      // Now update the React state
+      setUser(freshUser)
+      setToken(freshToken)
+      // Also set token in localStorage for API calls
+      localStorage.setItem('afia_access_token', freshToken)
 
-        // Cache the session + derive local credential hash for offline use
-        // AWAIT this to ensure IndexedDB write completes before proceeding
-        console.log('[AuthContext] Caching session for offline use (awaiting IndexedDB write)');
-        try {
-          await cacheSessionForOffline(
-            {
-              id: userData.id,
-              email: userData.email,
-              full_name: userData.full_name,
-              role: userData.role,
-              clinic_id: userData.clinic_id || (clinicId ? clinicId : undefined),
-              country_code: userData.country_code,
-              staff_id: userData.staff_id,
-              department: userData.department,
-            },
-            password
-          );
-          console.log('[AuthContext] IndexedDB write completed successfully');
-        } catch (e) {
-          console.warn('[Auth] Session cache failed (non-fatal):', e);
+    } else {
+      console.log("[AuthContext] Device is offline. Querying local database for cached credentials...")
+      const localSession = await getSessionFromLocalDB()
+
+      if (localSession && localSession.user) {
+        // Simple verification for offline proof of concept (match email)
+        if (localSession.user.email.toLowerCase() === email.toLowerCase()) {
+          console.log("[AuthContext] Offline login match successful!")
+          setUser(localSession.user)
+          setToken(localSession.token)
+          localStorage.setItem('afia_access_token', localSession.token)
+        } else {
+          throw new Error("Offline login failed. No local credentials found for this email on this device.")
         }
-
-        // Only set user state AFTER IndexedDB write completes
-        console.log('[AuthContext] Setting user from login:', userData.email);
-        setUser(userData);
-        afiaAPI.setCountry(userData.country_code);
+      } else {
+        throw new Error("No offline session profiles found. Please log in online first to cache your account.")
       }
-    } catch (error) {
-      console.error('[AuthContext] Login error:', error);
-      throw error;
-    } finally {
-      console.log('[AuthContext] Login complete, setting isLoading to false');
-      setIsLoading(false);
     }
-  }, []);
+  }
 
-  /**
-   * Logout and clear session
-   */
-  const logout = useCallback(async () => {
-    const email = localStorage.getItem('afia_last_email');
-    try {
-      if (navigator.onLine) {
-        await afiaAPI.logout();
-      }
-    } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      afiaAPI.clearTokens();
-      if (email) clearOfflineSession(email);
-      localStorage.removeItem('afia_last_email');
-      setUser(null);
-    }
-  }, []);
+  const logout = async () => {
+    console.log("[AuthContext] Logging out user...")
+    await clearSessionFromLocalDB()
+    setUser(null)
+    setToken(null)
+    localStorage.removeItem('afia_access_token')
+  }
 
-  /**
-   * Refresh user data from server
-   */
-  const refreshUser = useCallback(async () => {
-    try {
-      const response = await afiaAPI.getCurrentUser();
-      if (response.data) {
-        const userData: User = {
-          id: response.data.id,
-          email: response.data.email,
-          full_name: response.data.full_name,
-          role: response.data.role as User['role'],
-          clinic_id: response.data.clinic_id,
-          country_code: (response.data.country_code || 'GH') as 'GH' | 'ZW',
-          staff_id: response.data.staff_id,
-          department: response.data.department,
-        };
-        setUser(userData);
-      }
-    } catch (error) {
-      console.error('Failed to refresh user:', error);
-    }
-  }, []);
-
-  /**
-   * Check if user has a specific permission
-   */
-  const can = useCallback((permission: string): boolean => {
-    if (!user) return false;
+  const can = (permission: string): boolean => {
+    if (!user) return false
 
     const rolePermissions: Record<string, string[]> = {
       super_admin: ['*'],
@@ -310,51 +213,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       viewer: [
         'patients:read', 'encounters:read', 'knowledge:query',
       ],
-    };
-
-    const permissions = rolePermissions[user.role] || [];
-    return permissions.includes('*') || permissions.includes(permission);
-  }, [user]);
-
-  /**
-   * Verify admin password by re-authenticating with the backend.
-   * Used by AdminAuthModal to confirm sensitive operations.
-   */
-  const verifyAdminPassword = useCallback(async (password: string): Promise<boolean> => {
-    if (!user || !user.clinic_id) return false;
-    try {
-      // Re-login to verify credentials without changing session
-      const response = await afiaAPI.login(user.email, password, user.clinic_id, user.staff_id, user.department);
-      return !response.error && !!response.data;
-    } catch {
-      return false;
     }
-  }, [user]);
+
+    const permissions = rolePermissions[user.role] || []
+    return permissions.includes('*') || permissions.includes(permission)
+  }
+
+  const refreshUser = async () => {
+    try {
+      const response = await afiaAPI.getCurrentUser()
+      if (response.data) {
+        setUser(response.data)
+      }
+    } catch (error) {
+      console.error('Failed to refresh user:', error)
+    }
+  }
+
+  const verifyAdminPassword = async (password: string): Promise<boolean> => {
+    if (!user || !user.clinic_id) return false
+    try {
+      const response = await afiaAPI.login(user.email, password, user.clinic_id, user.staff_id, user.department)
+      return !response.error && !!response.data
+    } catch {
+      return false
+    }
+  }
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isLoading,
-        isAuthenticated: !!user,
-        login,
-        logout,
-        can,
-        refreshUser,
-        verifyAdminPassword,
-      }}
-    >
+    <AfiaAuthContext.Provider value={{
+      user,
+      token,
+      isAuthenticated: !!user,
+      isLoading,
+      login,
+      logout,
+      can,
+      refreshUser,
+      verifyAdminPassword,
+    }}>
       {children}
-    </AuthContext.Provider>
-  );
+    </AfiaAuthContext.Provider>
+  )
 }
 
 export function useAuth() {
-  const context = useContext(AuthContext);
+  const context = useContext(AfiaAuthContext)
   if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider")
   }
-  return context;
+  return context
 }
 
 /**
@@ -365,30 +273,30 @@ export function withAuth<P extends object>(
   requiredPermission?: string
 ) {
   return function ProtectedRoute(props: P) {
-    const { user, isLoading, isAuthenticated, can } = useAuth();
+    const { user, isLoading, isAuthenticated, can } = useAuth()
 
     useEffect(() => {
       if (!isLoading && !isAuthenticated) {
-        window.location.href = '/';
+        window.location.href = '/'
       }
 
       if (!isLoading && requiredPermission && !can(requiredPermission)) {
-        window.location.href = '/unauthorized';
+        window.location.href = '/unauthorized'
       }
-    }, [isLoading, isAuthenticated]);
+    }, [isLoading, isAuthenticated, can])
 
     if (isLoading) {
-      return <div>Loading...</div>;
+      return <div>Loading...</div>
     }
 
     if (!isAuthenticated) {
-      return null;
+      return null
     }
 
     if (requiredPermission && !can(requiredPermission)) {
-      return null;
+      return null
     }
 
-    return <Component {...props} />;
-  };
+    return <Component {...props} />
+  }
 }
