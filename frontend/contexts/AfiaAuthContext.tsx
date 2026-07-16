@@ -48,22 +48,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * Validate existing token on mount
    */
   useEffect(() => {
+    console.log('[AuthContext] Mounting - checking for existing token');
     const token = typeof window !== 'undefined' ? localStorage.getItem('afia_access_token') : null;
+    console.log('[AuthContext] Token found:', !!token);
     if (token) {
       validateToken();
     } else {
+      console.log('[AuthContext] No token found, setting isLoading to false');
       setIsLoading(false);
     }
   }, []);
 
   const validateToken = async () => {
+    console.log('[AuthContext] validateToken called');
     try {
       // ── OFFLINE PATH ──────────────────────────────────────────────────────
       if (typeof window !== 'undefined' && !navigator.onLine) {
+        console.log('[AuthContext] Offline mode - attempting to restore session from IndexedDB');
         // Try to restore a full session from IndexedDB offline cache
         const email = localStorage.getItem('afia_last_email');
+        console.log('[AuthContext] Last email found:', email);
         if (email) {
           const cached: CachedUserProfile | null = await restoreOfflineSession(email);
+          console.log('[AuthContext] Cached session found:', !!cached);
           if (cached) {
             const userData: User = {
               id: cached.id,
@@ -75,19 +82,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               staff_id: cached.staff_id,
               department: cached.department,
             };
+            console.log('[AuthContext] Setting user from cache:', userData.email);
             setUser(userData);
             afiaAPI.setCountry(userData.country_code);
             console.log('[Auth] Offline session restored from cache for:', email);
+            setIsLoading(false);
             return;
           }
         }
         // No cached session — user stays logged out until online
+        console.log('[AuthContext] No cached session, setting isLoading to false');
         setIsLoading(false);
         return;
       }
 
       // ── ONLINE PATH ───────────────────────────────────────────────────────
+      console.log('[AuthContext] Online mode - validating token with backend');
       const response = await afiaAPI.getCurrentUser();
+      console.log('[AuthContext] API response status:', response.status);
+      console.log('[AuthContext] API response data:', !!response.data);
 
       if (response.data) {
         const userData: User = {
@@ -101,21 +114,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           department: response.data.department,
         };
 
+        console.log('[AuthContext] Setting user from API:', userData.email);
         setUser(userData);
 
         // Set country context for API
         afiaAPI.setCountry(userData.country_code);
       } else if (response.status === 401) {
+        console.log('[AuthContext] Token invalid (401), clearing tokens');
         // Token invalid, clear
         afiaAPI.clearTokens();
       }
     } catch (error) {
-      console.error('Token validation failed:', error);
+      console.error('[AuthContext] Token validation failed:', error);
       // Only clear tokens if we are sure it's not a network error
       if (typeof window !== 'undefined' && navigator.onLine) {
+        console.log('[AuthContext] Online and error occurred, clearing tokens');
         afiaAPI.clearTokens();
       }
     } finally {
+      console.log('[AuthContext] validateToken complete, setting isLoading to false');
       setIsLoading(false);
     }
   };
@@ -125,12 +142,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * No self-registration - accounts are admin-provisioned
    */
   const login = useCallback(async (email: string, password: string, clinicId?: string, staffId?: string, department?: string, role?: string) => {
+    console.log('[AuthContext] login called for:', email);
     setIsLoading(true);
 
     try {
       // ── OFFLINE LOGIN PATH ────────────────────────────────────────────────
       if (typeof window !== 'undefined' && !navigator.onLine) {
+        console.log('[AuthContext] Offline login attempt');
         const cached = await restoreOfflineSession(email, password);
+        console.log('[AuthContext] Offline session restored:', !!cached);
         if (cached) {
           const userData: User = {
             id: cached.id,
@@ -142,16 +162,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             staff_id: cached.staff_id,
             department: cached.department,
           };
+          console.log('[AuthContext] Setting user from offline login:', userData.email);
           setUser(userData);
           afiaAPI.setCountry(userData.country_code);
           console.log('[Auth] Offline login successful for:', email);
+          setIsLoading(false);
           return;
         }
         throw new Error('Offline login failed. Please ensure you have logged in online at least once on this device.');
       }
 
       // ── ONLINE LOGIN PATH ─────────────────────────────────────────────────
+      console.log('[AuthContext] Online login attempt');
       const response = await afiaAPI.login(email, password, clinicId, staffId, department, role);
+      console.log('[AuthContext] API login response status:', response.status);
+      console.log('[AuthContext] API login response error:', response.error);
+      console.log('[AuthContext] API login response data:', !!response.data);
 
       if (response.error) {
         throw new Error(response.error);
@@ -162,6 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (response.data) {
+        console.log('[AuthContext] Login successful, processing user data');
         const userData: User = {
           id: response.data.user.id,
           email: response.data.user.email,
@@ -173,6 +200,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           department: response.data.user.department,
         };
 
+        console.log('[AuthContext] Setting user from login:', userData.email);
         setUser(userData);
         afiaAPI.setCountry(userData.country_code);
 
@@ -180,6 +208,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('afia_last_email', email.toLowerCase());
 
         // Cache the session + derive local credential hash for offline use
+        console.log('[AuthContext] Caching session for offline use');
         cacheSessionForOffline(
           {
             id: userData.id,
@@ -194,7 +223,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           password
         ).catch((e) => console.warn('[Auth] Session cache failed (non-fatal):', e));
       }
+    } catch (error) {
+      console.error('[AuthContext] Login error:', error);
+      throw error;
     } finally {
+      console.log('[AuthContext] Login complete, setting isLoading to false');
       setIsLoading(false);
     }
   }, []);

@@ -213,6 +213,7 @@ class AfiaAPI {
   // =========================================================================
 
   async login(email: string, password: string, clinicId?: string, staffId?: string, department?: string, role?: string) {
+    console.log('[AfiaAPI] Login request for:', email);
     const response = await this.request<{
       access_token: string;
       refresh_token: string;
@@ -222,10 +223,16 @@ class AfiaAPI {
       body: JSON.stringify({ email, password, clinic_id: clinicId, staff_id: staffId, department: department, role: role }),
     });
 
+    console.log('[AfiaAPI] Login response status:', response.status);
+    console.log('[AfiaAPI] Login response error:', response.error);
+    console.log('[AfiaAPI] Login response data:', !!response.data);
+
     if (response.data) {
+      console.log('[AfiaAPI] Setting tokens:', !!response.data.access_token, !!response.data.refresh_token);
       this.setTokens(response.data.access_token, response.data.refresh_token);
       // Set country from user context
       if (response.data.user.country_code) {
+        console.log('[AfiaAPI] Setting country to:', response.data.user.country_code);
         this.setCountry(response.data.user.country_code as 'GH' | 'ZW');
       }
     }

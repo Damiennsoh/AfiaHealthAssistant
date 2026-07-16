@@ -10,7 +10,10 @@ interface AuthWrapperProps {
 export default function AuthWrapper({ children }: AuthWrapperProps) {
   const { isAuthenticated, isLoading } = useAuth()
 
+  console.log('[AuthWrapper] Render - isAuthenticated:', isAuthenticated, 'isLoading:', isLoading);
+
   if (isLoading) {
+    console.log('[AuthWrapper] Showing loading state');
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center">
         <div className="text-center">
@@ -24,8 +27,10 @@ export default function AuthWrapper({ children }: AuthWrapperProps) {
   }
 
   if (!isAuthenticated) {
+    console.log('[AuthWrapper] User not authenticated, showing AuthPage');
     return <AuthPage />
   }
 
+  console.log('[AuthWrapper] User authenticated, rendering children');
   return <>{children}</>
 }

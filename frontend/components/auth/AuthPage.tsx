@@ -8,19 +8,18 @@ import ForgotPasswordForm from "./ForgotPasswordForm"
 import { useAuth } from "@/contexts/AfiaAuthContext"
 
 export default function AuthPage() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, isLoading } = useAuth()
   const [view, setView] = useState<'login' | 'forgot_password'>('login')
 
   if (isAuthenticated) {
+    console.log('[AuthPage] User is authenticated, redirecting to dashboard');
     return null // Will be handled by redirect in the layout
   }
 
   const handleLoginSuccess = () => {
-    console.log('[v0] Login success callback - redirecting to dashboard');
-    // Small delay to allow React state to fully update before navigation
-    setTimeout(() => {
-      window.location.href = "/";
-    }, 100);
+    console.log('[AuthPage] Login success callback - waiting for auth state to update');
+    // Wait for auth context to finish processing the login
+    // The AuthWrapper will handle the redirect once isAuthenticated becomes true
   }
 
   return (
