@@ -104,6 +104,7 @@ class AfiaAPI {
     retryCount = 0
   ): Promise<ApiResponse<T>> {
     const url = `${API_BASE}${endpoint}`;
+    console.log('[AfiaAPI] Request:', endpoint, options.method || 'GET', url);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -115,11 +116,17 @@ class AfiaAPI {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
+    console.log('[AfiaAPI] Request headers:', headers);
+    console.log('[AfiaAPI] Request body:', options.body);
+
     try {
       const response = await fetch(url, {
         ...options,
         headers,
       });
+
+      console.log('[AfiaAPI] Response status:', response.status);
+      console.log('[AfiaAPI] Response ok:', response.ok);
 
       // Handle token expiration
       if (response.status === 401) {

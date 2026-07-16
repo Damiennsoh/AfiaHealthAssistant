@@ -144,6 +144,11 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
     setError(null)
     setIsLoading(true)
 
+    console.log('[LoginForm] handleSubmit called');
+    console.log('[LoginForm] Email:', email);
+    console.log('[LoginForm] Is Super Admin:', isSuperAdmin);
+    console.log('[LoginForm] Selected Clinic:', selectedClinic?.name);
+
     // Super admin login doesn't require clinic selection
     if (!isSuperAdmin && !selectedClinic) {
       setError('Please select a clinic first')
@@ -152,6 +157,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
     }
 
     try {
+      console.log('[LoginForm] Calling login function...');
       await login(
         email, 
         password, 
@@ -160,10 +166,15 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
         isSuperAdmin ? undefined : (selectedClinic?.require_department ? department : undefined),
         isSuperAdmin ? 'super_admin' : undefined
       )
+      console.log('[LoginForm] Login function completed successfully');
+      console.log('[LoginForm] Calling onSuccess callback...');
       onSuccess?.()
+      console.log('[LoginForm] onSuccess callback completed');
     } catch (err) {
+      console.error('[LoginForm] Login error:', err);
       setError(err instanceof Error ? err.message : 'Login failed. Please check your credentials.')
     } finally {
+      console.log('[LoginForm] handleSubmit complete, setting isLoading to false');
       setIsLoading(false)
     }
   }
