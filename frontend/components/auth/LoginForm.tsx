@@ -443,8 +443,15 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
           </div>
 
           <Button
-            type="submit"
+            type="button"
             disabled={isLoading || isOffline}
+            onClick={(e) => {
+              console.log('[LoginForm] Button clicked');
+              e.preventDefault();
+              // Call handleSubmit directly
+              const formEvent = new Event('submit', { cancelable: true, bubbles: true });
+              handleSubmit(formEvent as any);
+            }}
             className="w-full bg-emerald-600 hover:bg-emerald-700 hover:shadow-emerald-300 text-white shadow-lg shadow-emerald-200 dark:shadow-none h-11 transition-all duration-200 transform hover:scale-[1.02]"
           >
             {isLoading ? (
