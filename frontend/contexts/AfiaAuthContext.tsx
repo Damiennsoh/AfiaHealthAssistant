@@ -48,15 +48,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * Validate existing token on mount
    */
   useEffect(() => {
-    console.log('[AuthContext] Mounting - checking for existing token');
-    const token = typeof window !== 'undefined' ? localStorage.getItem('afia_access_token') : null;
-    console.log('[AuthContext] Token found:', !!token);
-    if (token) {
-      validateToken();
-    } else {
-      console.log('[AuthContext] No token found, setting isLoading to false');
-      setIsLoading(false);
-    }
+    const initializeAuth = async () => {
+      console.log('[AuthContext] Mounting - checking for existing token');
+      const token = typeof window !== 'undefined' ? localStorage.getItem('afia_access_token') : null;
+      console.log('[AuthContext] Token found:', !!token);
+      if (token) {
+        await validateToken();
+      } else {
+        console.log('[AuthContext] No token found, setting isLoading to false');
+        setIsLoading(false);
+      }
+    };
+
+    initializeAuth();
   }, []);
 
   const validateToken = async () => {
@@ -200,28 +204,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           department: response.data.user.department,
         };
 
-        console.log('[AuthContext] Setting user from login:', userData.email);
-        setUser(userData);
-        afiaAPI.setCountry(userData.country_code);
-
         // Remember email for offline session restoration on next visit
         localStorage.setItem('afia_last_email', email.toLowerCase());
 
         // Cache the session + derive local credential hash for offline use
-        console.log('[AuthContext] Caching session for offline use');
-        cacheSessionForOffline(
-          {
-            id: userData.id,
-            email: userData.email,
-            full_name: userData.full_name,
-            role: userData.role,
-            clinic_id: userData.clinic_id || (clinicId ? clinicId : undefined),
-            country_code: userData.country_code,
-            staff_id: userData.staff_id,
-            department: userData.department,
-          },
-          password
-        ).catch((e) => console.warn('[Auth] Session cache failed (non-fatal):', e));
+        // AWAIT this to ensure IndexedDB write completes before proceeding
+        console.log('[AuthContext] Caching session for offline use (awaiting IndexedDB write)');
+        try {
+          await cacheSessionForOffline(
+            {
+              id: userData.id,
+              email: userData.email,
+              full_name: userData.full_name,
+              role: userData.role,
+              clinic_id: userData.clinic_id || (clinicId ? clinicId : undefined),
+              country_code: userData.country_code,
+              staff_id: userData.staff_id,
+              department: userData.department,
+            },
+            password
+          );
+          console.log('[AuthContext] IndexedDB write completed successfully');
+        } catch (e) {
+          console.warn('[Auth] Session cache failed (non-fatal):', e);
+        }
+
+        // Only set user state AFTER IndexedDB write completes
+        console.log('[AuthContext] Setting user from login:', userData.email);
+        setUser(userData);
+        afiaAPI.setCountry(userData.country_code);
       }
     } catch (error) {
       console.error('[AuthContext] Login error:', error);
