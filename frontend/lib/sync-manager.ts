@@ -2,6 +2,8 @@
  * AFIA Health Assistant — Offline Sync Manager
  * Queue changes locally, push when online
  */
+import { patientDB, encounterDB } from './db';
+import { toast } from 'sonner';
 
 export interface SyncQueueItem {
   id: string;
@@ -132,6 +134,23 @@ export class OfflineSyncManager {
         });
         conflicts++;
         // TODO: Show conflict resolution UI
+      } else if (result.status === 'conflict_resolved_server_wins') {
+        // Last-Write-Wins logic resolved on the server in favor of the server.
+        // We must accept the server's payload.
+        await this.updateQueueItem(result.offline_id, {
+          status: 'syncing', // Will be cleared or marked done eventually
+          entityId: result.server_id,
+        });
+        
+        // Update local DB
+        const entityType = queue.find(q => q.offlineId === result.offline_id)?.entityType;
+        if (entityType === 'patient' && result.server_payload) {
+          await patientDB.save(result.server_payload as any);
+          toast.info("A patient record was updated with the latest changes from the server.");
+        } else if (entityType === 'encounter' && result.server_payload) {
+          await encounterDB.save(result.server_payload as any);
+        }
+        pushed++;
       } else {
         await this.updateQueueItem(result.offline_id, {
           status: 'failed',
@@ -226,9 +245,15 @@ export class OfflineSyncManager {
   }
 
   private async applyPulledChange(item: any): Promise<void> {
-    // Apply server changes to local patient/encounter store
-    // Implementation depends on your local storage schema
-    console.log('Applying pulled change:', item);
+    try {
+      if (item.entity_type === 'patient') {
+        await patientDB.save(item.payload);
+      } else if (item.entity_type === 'encounter') {
+        await encounterDB.save(item.payload);
+      }
+    } catch (err) {
+      console.error('Failed to apply pulled change', err, item);
+    }
   }
 
   private getOrCreateDeviceId(): string {

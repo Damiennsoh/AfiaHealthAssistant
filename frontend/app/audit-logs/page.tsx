@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Download, Search, Filter, FileText } from "lucide-react"
+import { Loader2, Download, Search, Filter, FileText, ArrowLeft } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AfiaAuthContext"
 import { afiaAPI } from "@/lib/afia-api"
 import { toast } from "sonner"
@@ -63,6 +64,7 @@ const ACTION_COLORS: Record<string, string> = {
 
 export default function AuditLogsPage() {
   const { user } = useAuth()
+  const router = useRouter()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -162,16 +164,27 @@ export default function AuditLogsPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Audit Logs</h1>
-          <p className="text-muted-foreground">
-            {user?.role === "super_admin" 
-              ? "View all clinic-level events and changes"
-              : "View your clinic's patient, encounter, and staff events"
-            }
-          </p>
+        <div className="flex items-center gap-3">
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="md:hidden shrink-0"
+            onClick={() => router.back()}
+          >
+            <ArrowLeft className="h-5 w-5" />
+            <span className="sr-only">Go back</span>
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Audit Logs</h1>
+            <p className="text-muted-foreground text-sm sm:text-base">
+              {user?.role === "super_admin" 
+                ? "View all clinic-level events and changes"
+                : "View your clinic's patient, encounter, and staff events"
+              }
+            </p>
+          </div>
         </div>
-        <Button onClick={handleExport} variant="outline" className="gap-2">
+        <Button onClick={handleExport} variant="outline" className="w-full sm:w-auto gap-2">
           <Download className="h-4 w-4" />
           Export CSV
         </Button>
@@ -234,12 +247,12 @@ export default function AuditLogsPage() {
             </div>
           </div>
           
-          <div className="flex gap-2 mt-4">
-            <Button onClick={handleSearch} disabled={isLoading}>
+          <div className="flex flex-col sm:flex-row gap-2 mt-4">
+            <Button onClick={handleSearch} disabled={isLoading} className="w-full sm:w-auto">
               {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Search className="h-4 w-4 mr-2" />}
               Search
             </Button>
-            <Button onClick={handleFilterReset} variant="outline">
+            <Button onClick={handleFilterReset} variant="outline" className="w-full sm:w-auto">
               Reset
             </Button>
           </div>
@@ -270,62 +283,110 @@ export default function AuditLogsPage() {
               <p>No audit logs found</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[150px]">Timestamp</TableHead>
-                    <TableHead className="min-w-[120px]">Action</TableHead>
-                    <TableHead className="min-w-[150px]">User</TableHead>
-                    <TableHead className="min-w-[150px]">Clinic</TableHead>
-                    <TableHead className="min-w-[120px]">Resource</TableHead>
-                    <TableHead className="min-w-[200px]">Details</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {logs.map((log) => (
-                    <TableRow key={log.id}>
-                      <TableCell className="text-sm">
-                        {formatDate(log.created_at)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge 
-                          variant="secondary" 
-                          className={`${ACTION_COLORS[log.action] || "bg-gray-500"} text-white`}
-                        >
-                          {getActionLabel(log.action)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {log.user_email || "-"}
-                        {log.user_role && (
-                          <span className="text-muted-foreground text-xs ml-2">
-                            ({log.user_role})
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {log.clinic_name || "-"}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {log.resource_type || "-"}
-                        {log.resource_id && (
-                          <span className="text-muted-foreground text-xs ml-2">
-                            ({log.resource_id.slice(0, 8)}...)
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm max-w-xs truncate">
-                        {log.details && Object.keys(log.details).length > 0 ? (
-                          <span className="text-muted-foreground">
-                            {JSON.stringify(log.details).slice(0, 50)}...
-                          </span>
-                        ) : "-"}
-                      </TableCell>
+            <div className="space-y-4">
+              {/* Desktop Table View */}
+              <div className="hidden md:block overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[150px]">Timestamp</TableHead>
+                      <TableHead className="min-w-[120px]">Action</TableHead>
+                      <TableHead className="min-w-[150px]">User</TableHead>
+                      <TableHead className="min-w-[150px]">Clinic</TableHead>
+                      <TableHead className="min-w-[120px]">Resource</TableHead>
+                      <TableHead className="min-w-[200px]">Details</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {logs.map((log) => (
+                      <TableRow key={log.id}>
+                        <TableCell className="text-sm">
+                          {formatDate(log.created_at)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge 
+                            variant="secondary" 
+                            className={`${ACTION_COLORS[log.action] || "bg-gray-500"} text-white`}
+                          >
+                            {getActionLabel(log.action)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {log.user_email || "-"}
+                          {log.user_role && (
+                            <span className="text-muted-foreground text-xs ml-2">
+                              ({log.user_role})
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {log.clinic_name || "-"}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {log.resource_type || "-"}
+                          {log.resource_id && (
+                            <span className="text-muted-foreground text-xs ml-2">
+                              ({log.resource_id.slice(0, 8)}...)
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm max-w-xs truncate">
+                          {log.details && Object.keys(log.details).length > 0 ? (
+                            <span className="text-muted-foreground" title={JSON.stringify(log.details)}>
+                              {JSON.stringify(log.details).slice(0, 50)}...
+                            </span>
+                          ) : "-"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Mobile Card View */}
+              <div className="grid grid-cols-1 gap-4 md:hidden">
+                {logs.map((log) => (
+                  <div key={log.id} className="bg-card border rounded-lg p-4 space-y-3">
+                    <div className="flex justify-between items-start">
+                      <Badge 
+                        variant="secondary" 
+                        className={`${ACTION_COLORS[log.action] || "bg-gray-500"} text-white`}
+                      >
+                        {getActionLabel(log.action)}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {formatDate(log.created_at)}
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground block text-xs">User</span>
+                        <div className="font-medium truncate" title={log.user_email || ""}>{log.user_email || "-"}</div>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-xs">Clinic</span>
+                        <div className="font-medium truncate" title={log.clinic_name || ""}>{log.clinic_name || "-"}</div>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-xs">Resource</span>
+                        <div className="font-medium truncate">
+                          {log.resource_type || "-"}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {log.details && Object.keys(log.details).length > 0 && (
+                      <div className="pt-2 border-t mt-2">
+                        <span className="text-muted-foreground block text-xs mb-1">Details</span>
+                        <div className="text-xs bg-muted p-2 rounded break-all whitespace-pre-wrap">
+                          {JSON.stringify(log.details, null, 2)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           

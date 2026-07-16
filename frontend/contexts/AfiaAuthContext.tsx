@@ -1,8 +1,9 @@
 "use client"
 
 import React, { createContext, useContext, useState, useEffect } from 'react'
-import { afiaAPI } from '@/lib/afia-api'
 import { useRouter, usePathname } from 'next/navigation'
+import { getKey, setActiveKey } from '@/lib/crypto'
+import { afiaAPI } from '@/lib/afia-api'
 
 // Define the Auth Context State shape
 interface AuthContextType {
@@ -25,6 +26,8 @@ interface AuthContextType {
 }
 
 const AfiaAuthContext = createContext<AuthContextType | undefined>(undefined)
+
+const SESSION_EXPIRY_MS = 8 * 60 * 60 * 1000; // 8 hours
 
 // Simple local IndexedDB helper functions
 async function saveSessionToLocalDB(user: any, token: string) {
@@ -71,7 +74,18 @@ async function getSessionFromLocalDB() {
       const store = transaction.objectStore("session")
       const getRequest = store.get("current_session")
 
-      getRequest.onsuccess = () => resolve(getRequest.result || null)
+      getRequest.onsuccess = () => {
+        const session = getRequest.result
+        if (session) {
+          const isExpired = Date.now() - session.updatedAt > SESSION_EXPIRY_MS
+          if (isExpired) {
+            console.log("[AuthContext] Local session expired.")
+            clearSessionFromLocalDB().then(() => resolve(null)).catch(() => resolve(null))
+            return
+          }
+        }
+        resolve(session || null)
+      }
       getRequest.onerror = () => reject(getRequest.error)
     }
 
@@ -89,6 +103,29 @@ async function clearSessionFromLocalDB() {
       const deleteRequest = store.delete("current_session")
       deleteRequest.onsuccess = () => resolve()
       deleteRequest.onerror = () => reject(deleteRequest.error)
+    }
+    request.onerror = () => reject(request.error)
+  })
+}
+
+async function touchSessionInLocalDB() {
+  return new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open("afia_health_db", 1)
+    request.onsuccess = (e: any) => {
+      const db = e.target.result
+      const transaction = db.transaction("session", "readwrite")
+      const store = transaction.objectStore("session")
+      const getRequest = store.get("current_session")
+      
+      getRequest.onsuccess = () => {
+        const session = getRequest.result
+        if (session) {
+          session.updatedAt = Date.now()
+          store.put(session)
+        }
+        resolve()
+      }
+      getRequest.onerror = () => reject(getRequest.error)
     }
     request.onerror = () => reject(request.error)
   })
@@ -154,6 +191,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Invalid API response: Missing authentication token.")
       }
 
+      // Generate and store crypto key in memory
+      const cryptoKey = await getKey(password)
+      setActiveKey(cryptoKey)
+
       // CRITICAL: We must AWAIT the IndexedDB write before touching React state
       console.log("[AuthContext] Online auth success. Caching credentials asynchronously to IndexedDB...")
       await saveSessionToLocalDB(freshUser, freshToken)
@@ -173,6 +214,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Simple verification for offline proof of concept (match email)
         if (localSession.user.email.toLowerCase() === email.toLowerCase()) {
           console.log("[AuthContext] Offline login match successful!")
+          
+          // Generate and store crypto key in memory.
+          // Note: If the password is wrong, they will get a successful "login" here but will fail
+          // to decrypt any patients/encounters when fetching from the DB.
+          const cryptoKey = await getKey(password)
+          setActiveKey(cryptoKey)
+          
           setUser(localSession.user)
           setToken(localSession.token)
           localStorage.setItem('afia_access_token', localSession.token)
@@ -187,6 +235,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     console.log("[AuthContext] Logging out user...")
+    setActiveKey(null)
     await clearSessionFromLocalDB()
     setUser(null)
     setToken(null)
@@ -290,6 +339,11 @@ export function withAuth<P extends object>(
       if (!isLoading && isAuthenticated && requiredPermission && !can(requiredPermission)) {
         console.log(`[withAuth] Permission missing. Redirecting to /unauthorized`);
         router.replace('/unauthorized')
+      }
+
+      // Touch the session to keep it alive since the user is active on a protected route
+      if (isAuthenticated) {
+        touchSessionInLocalDB().catch(console.error)
       }
     }, [isLoading, isAuthenticated, can, pathname, router])
 

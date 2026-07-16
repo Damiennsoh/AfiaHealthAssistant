@@ -1,5 +1,6 @@
 // IndexedDB database layer for Afia Health Assistant
 // Uses raw IndexedDB for full control over stores and indexes
+import { getActiveKey, encryptData, decryptData } from './crypto';
 
 const DB_NAME = "afia-health-db";
 const DB_VERSION = 5; // Updated to fix missing object stores (aiRequests, uploads)
@@ -261,6 +262,25 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+// Crypto Integration Helper
+async function processItemFromDB<T>(storeName: string, item: any): Promise<T> {
+  if (!item) return item as T;
+  if ((storeName === 'patients' || storeName === 'encounters') && item.__encrypted_payload) {
+    if (!getActiveKey()) return item as T;
+    try {
+      const decryptedString = await decryptData(item.__encrypted_payload, getActiveKey()!);
+      const decryptedObj = JSON.parse(decryptedString);
+      const result = { ...decryptedObj, ...item };
+      delete result.__encrypted_payload;
+      return result as T;
+    } catch (err) {
+      console.error("Decryption failed for item from DB", err);
+      return item as T;
+    }
+  }
+  return item as T;
+}
+
 // Generic CRUD helpers
 async function getAll<T>(storeName: string, includeDeleted: boolean = false): Promise<T[]> {
   const db = await openDB();
@@ -268,13 +288,16 @@ async function getAll<T>(storeName: string, includeDeleted: boolean = false): Pr
     const tx = db.transaction(storeName, "readonly");
     const store = tx.objectStore(storeName);
     const request = store.getAll();
-    request.onsuccess = () => {
-      const results = request.result as T[];
+    request.onsuccess = async () => {
+      const rawResults = request.result as any[];
+      const processedResults = await Promise.all(
+        rawResults.map(item => processItemFromDB<T>(storeName, item))
+      );
       if (includeDeleted) {
-        resolve(results);
+        resolve(processedResults);
       } else {
         // Filter out deleted items if not requested
-        resolve(results.filter((item: any) => !item.deleted && !item.isDeleted));
+        resolve(processedResults.filter((item: any) => !item.deleted && !item.isDeleted));
       }
     };
     request.onerror = () => reject(request.error);
@@ -287,8 +310,9 @@ async function getById<T>(storeName: string, id: string): Promise<T | null> {
     const tx = db.transaction(storeName, "readonly");
     const store = tx.objectStore(storeName);
     const request = store.get(id);
-    request.onsuccess = () => {
-      const item = request.result as T;
+    request.onsuccess = async () => {
+      const rawItem = request.result;
+      const item = await processItemFromDB<T>(storeName, rawItem);
       // Return null if item is deleted (unless specifically checking deleted items via other methods)
       if (item && ((item as any).deleted || (item as any).isDeleted)) {
         resolve(null);
@@ -302,10 +326,49 @@ async function getById<T>(storeName: string, id: string): Promise<T | null> {
 
 async function put<T>(storeName: string, item: T): Promise<T> {
   const db = await openDB();
+  
+  let itemToStore: any = { ...item };
+  
+  if ((storeName === 'patients' || storeName === 'encounters') && getActiveKey()) {
+    try {
+      const payloadString = JSON.stringify(item);
+      const encryptedPayload = await encryptData(payloadString, getActiveKey()!);
+      // Keep indexed fields in plaintext so querying works
+      if (storeName === 'patients') {
+        itemToStore = {
+          id: (item as any).id,
+          folderNumber: (item as any).folderNumber,
+          nhisNumber: (item as any).nhisNumber,
+          name: (item as any).name,
+          locality: (item as any).locality,
+          createdAt: (item as any).createdAt,
+          updatedAt: (item as any).updatedAt,
+          deleted: (item as any).deleted,
+          isDeleted: (item as any).isDeleted,
+          __encrypted_payload: encryptedPayload
+        };
+      } else if (storeName === 'encounters') {
+        itemToStore = {
+          id: (item as any).id,
+          patientId: (item as any).patientId,
+          date: (item as any).date,
+          status: (item as any).status,
+          createdAt: (item as any).createdAt,
+          updatedAt: (item as any).updatedAt,
+          deleted: (item as any).deleted,
+          isDeleted: (item as any).isDeleted,
+          __encrypted_payload: encryptedPayload
+        };
+      }
+    } catch (err) {
+      console.error(`Encryption failed before ${storeName} DB write`, err);
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, "readwrite");
     const store = tx.objectStore(storeName);
-    const request = store.put(item);
+    const request = store.put(itemToStore);
     request.onsuccess = () => {
       resolve(item);
       notify(storeName);
@@ -372,12 +435,15 @@ async function getByIndex<T>(
     const store = tx.objectStore(storeName);
     const index = store.index(indexName);
     const request = index.getAll(value);
-    request.onsuccess = () => {
-      const results = request.result as T[];
+    request.onsuccess = async () => {
+      const rawResults = request.result as any[];
+      const processedResults = await Promise.all(
+        rawResults.map(item => processItemFromDB<T>(storeName, item))
+      );
       if (includeDeleted) {
-        resolve(results);
+        resolve(processedResults);
       } else {
-        resolve(results.filter((item: any) => !item.deleted && !item.isDeleted));
+        resolve(processedResults.filter((item: any) => !item.deleted && !item.isDeleted));
       }
     };
     request.onerror = () => reject(request.error);
