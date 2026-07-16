@@ -69,37 +69,32 @@ class AuthService:
                 raise AuthenticationError("Invalid credentials")
         
         # Find user by email
-        # Super admins can login without being tied to a specific clinic
-        if login_data.role == UserRole.SUPER_ADMIN:
-            result = await self.db.execute(
-                select(User)
-                .options(joinedload(User.clinic))
-                .where(and_(
-                    User.email == login_data.email, 
-                    User.is_active == True,
-                    User.role == UserRole.SUPER_ADMIN
-                ))
-            )
-        else:
-            # Regular users must belong to the selected clinic
-            result = await self.db.execute(
-                select(User)
-                .options(joinedload(User.clinic))
-                .where(and_(
-                    User.email == login_data.email, 
-                    User.is_active == True,
-                    User.clinic_id == login_data.clinic_id
-                ))
-            )
+        result = await self.db.execute(
+            select(User)
+            .options(joinedload(User.clinic))
+            .where(and_(
+                User.email == login_data.email, 
+                User.is_active == True
+            ))
+        )
         user = result.scalar_one_or_none()
 
         if not user:
             security_logger.warning(
-                "Login failed: user not found or not in clinic", 
-                email=login_data.email,
-                clinic_id=str(login_data.clinic_id)
+                "Login failed: user not found", 
+                email=login_data.email
             )
             raise AuthenticationError("Invalid credentials")
+
+        # Validate clinic assignment based on role
+        if user.role != UserRole.SUPER_ADMIN:
+            if not login_data.clinic_id or user.clinic_id != login_data.clinic_id:
+                security_logger.warning(
+                    "Login failed: user not in clinic", 
+                    email=login_data.email,
+                    clinic_id=str(login_data.clinic_id)
+                )
+                raise AuthenticationError("Invalid credentials")
         
         # Validate staff_id if required by the clinic (only for non-super_admin users)
         if clinic and clinic.require_staff_id:
