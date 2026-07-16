@@ -193,7 +193,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
         <Alert variant="destructive" className="bg-yellow-50 border-yellow-200 text-yellow-800">
           <WifiOff className="h-4 w-4" />
           <AlertDescription>
-            You are currently offline. Login requires internet connection to authenticate with the server.
+            You are currently offline. If you have logged in before on this device, you can authenticate using cached credentials. First-time login requires internet connection.
           </AlertDescription>
         </Alert>
       )}
@@ -444,7 +444,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
 
           <Button
             type="button"
-            disabled={isLoading || isOffline}
+            disabled={isLoading}
             onClick={(e) => {
               console.log('[LoginForm] Button clicked');
               e.preventDefault();
