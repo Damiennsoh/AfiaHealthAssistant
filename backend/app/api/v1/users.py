@@ -105,7 +105,8 @@ async def update_own_profile(
 ):
     """
     Update own profile (clinic admin only).
-    Allows updating: email, phone, and clinic details (name, email, phone).
+    Allows updating: name, email, phone, and clinic details (name, email, phone).
+    All changes are recorded in the audit log.
     """
     if current_user.role != UserRole.CLINIC_ADMIN:
         raise HTTPException(status_code=403, detail="Only clinic admins can update their profile")
@@ -114,19 +115,25 @@ async def update_own_profile(
     from app.models.clinic import Clinic
     from app.services.audit_service import AuditService
     from app.models.audit import AuditAction
-    
-    # Update user fields
-    if "email" in profile_data:
+
+    # --- Track and apply user-level changes ---
+    user_changes = {}
+    if "email" in profile_data and current_user.email != profile_data["email"]:
+        user_changes["email"] = {"old": current_user.email, "new": profile_data["email"]}
         current_user.email = profile_data["email"]
-    if "phone" in profile_data:
+    if "phone" in profile_data and current_user.phone != profile_data["phone"]:
+        user_changes["phone"] = {"old": current_user.phone, "new": profile_data["phone"]}
         current_user.phone = profile_data["phone"]
-    
-    # Update clinic fields if clinic admin
+    if "name" in profile_data and current_user.name != profile_data["name"]:
+        user_changes["name"] = {"old": current_user.name, "new": profile_data["name"]}
+        current_user.name = profile_data["name"]
+
+    # --- Track and apply clinic-level changes ---
+    clinic_changes = {}
     if current_user.clinic_id:
         result = await db.execute(select(Clinic).where(Clinic.id == current_user.clinic_id))
         clinic = result.scalar_one_or_none()
         if clinic:
-            clinic_changes = {}
             if "clinic_name" in profile_data and clinic.name != profile_data["clinic_name"]:
                 clinic_changes["name"] = {"old": clinic.name, "new": profile_data["clinic_name"]}
                 clinic.name = profile_data["clinic_name"]
@@ -136,19 +143,89 @@ async def update_own_profile(
             if "clinic_phone" in profile_data and clinic.phone != profile_data["clinic_phone"]:
                 clinic_changes["phone"] = {"old": clinic.phone, "new": profile_data["clinic_phone"]}
                 clinic.phone = profile_data["clinic_phone"]
-            
-            # Log clinic updates
-            if clinic_changes:
-                audit_service = AuditService(db)
-                await audit_service.log(
-                    action=AuditAction.CLINIC_UPDATED,
-                    user=current_user,
-                    clinic=clinic,
-                    resource_type="clinic",
-                    resource_id=str(clinic.id),
-                    details={"changes": clinic_changes}
-                )
-    
+            if "clinic_region" in profile_data and clinic.region != profile_data["clinic_region"]:
+                clinic_changes["region"] = {"old": clinic.region, "new": profile_data["clinic_region"]}
+                clinic.region = profile_data["clinic_region"]
+            if "clinic_district" in profile_data and clinic.district != profile_data["clinic_district"]:
+                clinic_changes["district"] = {"old": clinic.district, "new": profile_data["clinic_district"]}
+                clinic.district = profile_data["clinic_district"]
+            if "clinic_address" in profile_data and clinic.address != profile_data["clinic_address"]:
+                clinic_changes["address"] = {"old": clinic.address, "new": profile_data["clinic_address"]}
+                clinic.address = profile_data["clinic_address"]
+
     await db.commit()
-    
+    await db.refresh(current_user)
+
+    audit_service = AuditService(db)
+
+    # Log user profile changes
+    if user_changes:
+        await audit_service.log(
+            action=AuditAction.USER_PROFILE_UPDATED,
+            user=current_user,
+            clinic=clinic if current_user.clinic_id else None,
+            resource_type="user",
+            resource_id=str(current_user.id),
+            details={"changes": user_changes, "updated_by": current_user.email}
+        )
+
+    # Log clinic changes
+    if clinic_changes and current_user.clinic_id:
+        await audit_service.log(
+            action=AuditAction.CLINIC_UPDATED,
+            user=current_user,
+            clinic=clinic,
+            resource_type="clinic",
+            resource_id=str(clinic.id),
+            details={"changes": clinic_changes, "updated_by": current_user.email}
+        )
+
     return {"success": True, "message": "Profile updated successfully"}
+
+
+@router.post("/clinics/{clinic_id}/reset-admin-password")
+async def reset_clinic_admin_password(
+    clinic_id: UUID,
+    data: PasswordResetRequest,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Reset a clinic's admin user password (super_admin only).
+    Looks up the clinic's admin_user_id and resets their password.
+    Records the action in the audit log.
+    """
+    from sqlalchemy import select
+    from app.models.clinic import Clinic
+    from app.services.auth_service import AuthService
+    from app.services.audit_service import AuditService
+    from app.models.audit import AuditAction
+
+    result = await db.execute(select(Clinic).where(Clinic.id == clinic_id))
+    clinic = result.scalar_one_or_none()
+    if not clinic:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    if not clinic.admin_user_id:
+        raise HTTPException(status_code=404, detail="This clinic has no assigned admin user")
+
+    auth_service = AuthService(db)
+    await auth_service.admin_reset_password(current_user, clinic.admin_user_id, data.new_password)
+
+    # Log the password reset
+    audit_service = AuditService(db)
+    await audit_service.log(
+        action=AuditAction.ADMIN_PASSWORD_RESET,
+        user=current_user,
+        clinic=clinic,
+        resource_type="user",
+        resource_id=str(clinic.admin_user_id),
+        details={
+            "reset_by": current_user.email,
+            "clinic_name": clinic.name,
+            "clinic_code": clinic.code,
+        }
+    )
+
+    return {"success": True, "message": f"Admin password for clinic '{clinic.name}' has been reset."}
+

@@ -1,16 +1,25 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Plus, Building, Users, Activity, Ban, Archive, Trash2, CheckCircle } from "lucide-react"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
+import {
+  Loader2, Plus, Building, Users, Activity, Ban, Archive,
+  Trash2, CheckCircle, KeyRound, Eye, EyeOff, Save, RotateCcw,
+  Mail, Phone, MapPin, User
+} from "lucide-react"
 import { toast } from "sonner"
 import { afiaAPI } from "@/lib/afia-api"
 import { useAuth } from "@/contexts/AfiaAuthContext"
@@ -38,8 +47,212 @@ interface Clinic {
   patient_count: number
 }
 
+const validatePassword = (password: string): string | null => {
+  if (password.length < 8) return "Password must be at least 8 characters"
+  if (!/[A-Z]/.test(password)) return "Password must contain at least one uppercase letter"
+  if (!/[a-z]/.test(password)) return "Password must contain at least one lowercase letter"
+  if (!/\d/.test(password)) return "Password must contain at least one digit"
+  if (!/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)) return "Password must contain at least one special character"
+  return null
+}
+
+function AdminPasswordResetPanel({ clinic }: { clinic: Clinic }) {
+  const [newPassword, setNewPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [isResetting, setIsResetting] = useState(false)
+
+  const handleReset = async () => {
+    const err = validatePassword(newPassword)
+    if (err) { setPasswordError(err); return }
+    setPasswordError(null)
+    setIsResetting(true)
+    try {
+      const res = await afiaAPI.adminResetClinicAdminPassword(clinic.id, newPassword)
+      if (res.error) throw new Error(String(res.error))
+      toast.success(`Admin password for ${clinic.name} has been reset.`)
+      setNewPassword("")
+    } catch (e: any) {
+      toast.error(e.message || "Failed to reset password")
+    } finally {
+      setIsResetting(false)
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-slate-200 dark:border-slate-700 pt-4">
+      <div className="flex items-center gap-2 mb-2">
+        <KeyRound className="h-4 w-4 text-amber-500" />
+        <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Reset Clinic Admin Password</span>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+        Set a new temporary password for this clinic's administrator. They should change it on next login.
+      </p>
+      <div className="flex items-start gap-2">
+        <div className="flex-1 space-y-1">
+          <div className="relative">
+            <Input
+              type={showPassword ? "text" : "password"}
+              value={newPassword}
+              onChange={(e) => {
+                setNewPassword(e.target.value)
+                setPasswordError(validatePassword(e.target.value))
+              }}
+              placeholder="New admin password"
+              className="pr-10 text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(v => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          {passwordError && <p className="text-xs text-red-500">{passwordError}</p>}
+        </div>
+        <Button
+          size="sm"
+          disabled={isResetting || !newPassword}
+          onClick={handleReset}
+          className="bg-amber-500 hover:bg-amber-600 text-white shrink-0"
+        >
+          {isResetting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+          <span className="ml-1.5">Reset</span>
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function ClinicAdminEditPanel({ clinic }: { clinic: Clinic }) {
+  const { user } = useAuth()
+
+  const buildInitialForm = () => ({
+    name: (user as any)?.name || user?.full_name || "",
+    email: user?.email || "",
+    phone: (user as any)?.phone || "",
+    clinic_name: clinic.name || "",
+    clinic_email: clinic.email || "",
+    clinic_phone: clinic.phone || "",
+    clinic_region: clinic.region || "",
+    clinic_district: clinic.district || "",
+    clinic_address: clinic.address || "",
+  })
+
+  const [form, setForm] = useState(buildInitialForm)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSaving(true)
+    try {
+      const res = await afiaAPI.updateOwnProfile(form)
+      if (res.error) throw new Error(String(res.error))
+      toast.success("Profile and clinic details updated. Changes have been logged.")
+    } catch (e: any) {
+      toast.error(e.message || "Failed to save changes")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const field = (key: keyof ReturnType<typeof buildInitialForm>) => ({
+    value: form[key],
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+      setForm(prev => ({ ...prev, [key]: e.target.value }))
+  })
+
+  return (
+    <form onSubmit={handleSave} className="space-y-5 pt-2">
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <User className="h-4 w-4 text-emerald-600" />
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Your Admin Details</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Full Name</Label>
+            <Input {...field("name")} placeholder="Your name" className="h-9 text-sm" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Email</Label>
+            <div className="relative">
+              <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input {...field("email")} type="email" placeholder="your@email.com" className="h-9 text-sm pl-8" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Phone</Label>
+            <div className="relative">
+              <Phone className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input {...field("phone")} type="tel" placeholder="+233 20 000 0000" className="h-9 text-sm pl-8" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Building className="h-4 w-4 text-emerald-600" />
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Clinic Contact Details</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="space-y-1 md:col-span-2">
+            <Label className="text-xs">Clinic Name</Label>
+            <Input {...field("clinic_name")} placeholder="Clinic display name" className="h-9 text-sm" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Clinic Email</Label>
+            <div className="relative">
+              <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input {...field("clinic_email")} type="email" placeholder="clinic@facility.org" className="h-9 text-sm pl-8" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Clinic Phone</Label>
+            <div className="relative">
+              <Phone className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input {...field("clinic_phone")} type="tel" placeholder="+233 20 000 0000" className="h-9 text-sm pl-8" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Region / Province</Label>
+            <div className="relative">
+              <MapPin className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input {...field("clinic_region")} placeholder="Region or province" className="h-9 text-sm pl-8" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">District</Label>
+            <Input {...field("clinic_district")} placeholder="District name" className="h-9 text-sm" />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <Label className="text-xs">Physical Address</Label>
+            <Input {...field("clinic_address")} placeholder="Street address" className="h-9 text-sm" />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 pt-1">
+        <Button type="submit" disabled={isSaving} className="bg-emerald-600 hover:bg-emerald-700 h-9 text-sm">
+          {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+          Save Changes
+        </Button>
+        <Button type="button" variant="outline" onClick={() => setForm(buildInitialForm())} className="h-9 text-sm">
+          <RotateCcw className="mr-2 h-3.5 w-3.5" /> Reset
+        </Button>
+      </div>
+      <p className="text-xs text-slate-400">All changes are recorded in the system audit log.</p>
+    </form>
+  )
+}
+
 export function ClinicManagement() {
   const { user } = useAuth()
+  const isSuperAdmin = user?.role === "super_admin"
+  const isClinicAdmin = user?.role === "clinic_admin"
+
   const [clinics, setClinics] = useState<Clinic[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,80 +260,50 @@ export function ClinicManagement() {
   const [showPassword, setShowPassword] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
 
-  const validatePassword = (password: string): string | null => {
-    if (password.length < 8) {
-      return "Password must be at least 8 characters"
-    }
-    if (!/[A-Z]/.test(password)) {
-      return "Password must contain at least one uppercase letter"
-    }
-    if (!/[a-z]/.test(password)) {
-      return "Password must contain at least one lowercase letter"
-    }
-    if (!/\d/.test(password)) {
-      return "Password must contain at least one digit"
-    }
-    if (!/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password)) {
-      return "Password must contain at least one special character"
-    }
-    return null
+  const emptyCreateForm = {
+    name: "", code: "", country_code: "GH" as "GH" | "ZW",
+    region: "", district: "", address: "", phone: "", email: "",
+    admin_email: "", admin_name: "", admin_temp_password: "",
+    admin_staff_id: "", admin_department: "",
+    require_staff_id: false, require_department: false
   }
-  const [createForm, setCreateForm] = useState({
-    name: "",
-    code: "",
-    country_code: "GH" as "GH" | "ZW",
-    region: "",
-    district: "",
-    address: "",
-    phone: "",
-    email: "",
-    admin_email: "",
-    admin_name: "",
-    admin_temp_password: "",
-    admin_staff_id: "",
-    admin_department: "",
-    require_staff_id: false,
-    require_department: false
-  })
+  const [createForm, setCreateForm] = useState(emptyCreateForm)
 
-  const loadClinics = async () => {
+  const loadClinics = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     try {
-      const response = await afiaAPI.listClinics()
-      if (response.data && Array.isArray(response.data)) {
-        setClinics(response.data as Clinic[])
+      if (isSuperAdmin) {
+        const response = await afiaAPI.listClinics()
+        if (response.data && Array.isArray(response.data)) {
+          setClinics(response.data as Clinic[])
+        }
+      } else if (isClinicAdmin && user?.clinic_id) {
+        const response = await afiaAPI.getClinic(user.clinic_id)
+        if (response.data) {
+          setClinics([response.data as unknown as Clinic])
+        }
       }
-    } catch (err) {
-      setError("Failed to load clinics")
+    } catch {
+      setError("Failed to load clinic information")
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [isSuperAdmin, isClinicAdmin, user?.clinic_id])
 
   useEffect(() => {
-    if (user?.role === "super_admin") {
-      loadClinics()
-    }
-  }, [user])
+    if (isSuperAdmin || isClinicAdmin) loadClinics()
+  }, [loadClinics])
 
   const handleCreateClinic = async (e: React.FormEvent) => {
     e.preventDefault()
+    const pwErr = validatePassword(createForm.admin_temp_password)
+    if (pwErr) { setPasswordError(pwErr); return }
+    setPasswordError(null)
     setIsLoading(true)
     setError(null)
-    setPasswordError(null)
-
-    // Validate password before submission
-    const passwordValidationError = validatePassword(createForm.admin_temp_password)
-    if (passwordValidationError) {
-      setPasswordError(passwordValidationError)
-      setIsLoading(false)
-      return
-    }
-
     try {
-      // 1. Sanitize the payload: Force code to uppercase, convert empty strings to undefined
-      const sanitizedForm = {
+      const sanitized = {
         ...createForm,
         code: createForm.code.toUpperCase().trim(),
         region: createForm.region.trim() || undefined,
@@ -128,160 +311,83 @@ export function ClinicManagement() {
         address: createForm.address.trim() || undefined,
         phone: createForm.phone.trim() || undefined,
         email: createForm.email.trim() || undefined,
-        // tier field removed - subscription disabled for now
       }
-
-      const response = await afiaAPI.createClinic(sanitizedForm as any)
-      
+      const response = await afiaAPI.createClinic(sanitized as any)
       if (response && !response.error) {
         toast.success("Clinic created successfully")
-        setCreateForm({
-          name: "",
-          code: "",
-          country_code: "GH" as "GH" | "ZW",
-          region: "",
-          district: "",
-          address: "",
-          phone: "",
-          email: "",
-          admin_email: "",
-          admin_name: "",
-          admin_temp_password: "",
-          admin_staff_id: "",
-          admin_department: "",
-          require_staff_id: false,
-          require_department: false
-        })
+        setCreateForm(emptyCreateForm)
         setIsCreateDialogOpen(false)
         await loadClinics()
       } else {
-        // Handle custom format errors returned inside response
         if (Array.isArray(response.error)) {
-          const messages = response.error.map((e: any) => `${e.loc?.join('.') || 'field'}: ${e.msg}`).join('; ')
-          setError(messages)
-        } else if (typeof response.error === 'object' && response.error !== null) {
-          setError(JSON.stringify(response.error))
+          setError(response.error.map((e: any) => `${e.loc?.join('.') || 'field'}: ${e.msg}`).join('; '))
         } else {
           setError(String(response.error || "Failed to create clinic"))
         }
       }
     } catch (err: any) {
-      // 2. Safe error catching to prevent React Error #31
-      if (err?.response?.data?.detail) {
-        const backendError = err.response.data.detail
-        if (Array.isArray(backendError)) {
-          const messages = backendError.map((e: any) => {
-            // Get the field name (last element in location array)
-            const field = e.loc && e.loc.length > 0 ? e.loc[e.loc.length - 1] : 'field';
-            return `${field}: ${e.msg}`;
-          }).join('; ')
-          setError(messages)
-        } else if (typeof backendError === 'object' && backendError !== null) {
-          // If the error is a single object, format it safely
-          const message = backendError.msg || backendError.detail || JSON.stringify(backendError)
-          setError(message)
-        } else {
-          setError(String(backendError))
-        }
-      } else {
-        setError(err.message || "Failed to create clinic")
-      }
+      setError(err.message || "Failed to create clinic")
     } finally {
       setIsLoading(false)
     }
   }
 
-  const handleSuspendClinic = async (clinicId: string) => {
-    if (!confirm("Are you sure you want to suspend this clinic? This will disable access for all users.")) {
-      return
-    }
-    
+  const handleSuspend = async (clinicId: string, isSuspended: boolean) => {
+    if (!isSuspended && !confirm("Suspend this clinic? All users will lose access.")) return
     try {
-      await afiaAPI.suspendClinic(clinicId)
-      toast.success("Clinic suspended successfully")
+      isSuspended ? await afiaAPI.unsuspendClinic(clinicId) : await afiaAPI.suspendClinic(clinicId)
+      toast.success(isSuspended ? "Clinic reactivated" : "Clinic suspended")
       await loadClinics()
-    } catch (err: any) {
-      toast.error("Failed to suspend clinic")
-    }
+    } catch { toast.error("Action failed") }
   }
 
-  const handleUnsuspendClinic = async (clinicId: string) => {
-    try {
-      await afiaAPI.unsuspendClinic(clinicId)
-      toast.success("Clinic unsuspended successfully")
-      await loadClinics()
-    } catch (err: any) {
-      toast.error("Failed to unsuspend clinic")
-    }
-  }
-
-  const handleArchiveClinic = async (clinicId: string) => {
-    if (!confirm("Are you sure you want to archive this clinic? This will soft-delete the clinic and all its data.")) {
-      return
-    }
-    
+  const handleArchive = async (clinicId: string) => {
+    if (!confirm("Archive this clinic? This soft-deletes all clinic data.")) return
     try {
       await afiaAPI.archiveClinic(clinicId)
-      toast.success("Clinic archived successfully")
+      toast.success("Clinic archived")
       await loadClinics()
-    } catch (err: any) {
-      toast.error("Failed to archive clinic")
-    }
+    } catch { toast.error("Failed to archive clinic") }
   }
 
-  const handleDeleteClinic = async (clinicId: string, isDemo: boolean) => {
-    if (!isDemo) {
-      toast.error("Only demo clinics can be deleted. Use archive for regular clinics.")
-      return
-    }
-    
-    if (!confirm("Are you sure you want to permanently delete this demo clinic? This action cannot be undone.")) {
-      return
-    }
-    
+  const handleDelete = async (clinicId: string) => {
+    if (!confirm("Permanently delete this demo clinic? This cannot be undone.")) return
     try {
       await afiaAPI.deleteClinic(clinicId)
-      toast.success("Demo clinic deleted successfully")
+      toast.success("Demo clinic deleted")
       await loadClinics()
-    } catch (err: any) {
-      toast.error("Failed to delete clinic")
-    }
+    } catch { toast.error("Failed to delete clinic") }
   }
 
-  if (!user || user.role !== "super_admin") {
-    return null
-  }
+  if (!user || (!isSuperAdmin && !isClinicAdmin)) return null
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Clinic Management</h2>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+            {isSuperAdmin ? "Clinic Management" : "My Clinic"}
+          </h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Manage all clinics and facilities
+            {isSuperAdmin
+              ? "Manage all registered healthcare facilities"
+              : "View and update your clinic profile and contact details"}
           </p>
         </div>
-        <Button 
-          onClick={() => setIsCreateDialogOpen(true)} 
-          className="bg-emerald-600 hover:bg-emerald-700 gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Add Clinic
-        </Button>
+        {isSuperAdmin && (
+          <Button onClick={() => setIsCreateDialogOpen(true)} className="bg-emerald-600 hover:bg-emerald-700 gap-2">
+            <Plus className="h-4 w-4" /> Add Clinic
+          </Button>
+        )}
       </div>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
 
       {isCreateDialogOpen && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Building className="h-5 w-5 text-emerald-600" />
-              Create New Clinic
+              <Building className="h-5 w-5 text-emerald-600" /> Create New Clinic
             </CardTitle>
             <CardDescription>
               Add a new healthcare facility and create its initial administrator account
@@ -291,34 +397,22 @@ export function ClinicManagement() {
             <form onSubmit={handleCreateClinic} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="name">Clinic Name</Label>
-                  <Input 
-                    id="name"
-                    value={createForm.name}
-                    onChange={(e) => setCreateForm(prev => ({ ...prev, name: e.target.value }))}
-                    required
-                    placeholder="CHPS Compound, District Hospital, etc."
-                  />
+                  <Label htmlFor="c-name">Clinic Name</Label>
+                  <Input id="c-name" value={createForm.name}
+                    onChange={e => setCreateForm(p => ({ ...p, name: e.target.value }))}
+                    required placeholder="CHPS Compound, District Hospital…" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="code">Clinic Code</Label>
-                  <Input
-                    id="code"
-                    value={createForm.code}
-                    onChange={(e) => setCreateForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
-                    required
-                    placeholder="Unique facility code (uppercase)"
-                  />
+                  <Label htmlFor="c-code">Clinic Code</Label>
+                  <Input id="c-code" value={createForm.code}
+                    onChange={e => setCreateForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
+                    required placeholder="Unique uppercase code" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="country-code">Country</Label>
-                  <Select 
-                    value={createForm.country_code} 
-                    onValueChange={(v: "GH" | "ZW") => setCreateForm(prev => ({ ...prev, country_code: v }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select country" />
-                    </SelectTrigger>
+                  <Label>Country</Label>
+                  <Select value={createForm.country_code}
+                    onValueChange={(v: "GH" | "ZW") => setCreateForm(p => ({ ...p, country_code: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Select country" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="GH">Ghana</SelectItem>
                       <SelectItem value="ZW">Zimbabwe</SelectItem>
@@ -326,167 +420,105 @@ export function ClinicManagement() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="region">Region/Province</Label>
-                  <Input 
-                    id="region"
-                    value={createForm.region}
-                    onChange={(e) => setCreateForm(prev => ({ ...prev, region: e.target.value }))}
-                    placeholder="Region or province name"
-                  />
+                  <Label htmlFor="c-region">Region/Province</Label>
+                  <Input id="c-region" value={createForm.region}
+                    onChange={e => setCreateForm(p => ({ ...p, region: e.target.value }))}
+                    placeholder="Region or province name" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="district">District</Label>
-                  <Input 
-                    id="district"
-                    value={createForm.district}
-                    onChange={(e) => setCreateForm(prev => ({ ...prev, district: e.target.value }))}
-                    placeholder="District name"
-                  />
+                  <Label htmlFor="c-district">District</Label>
+                  <Input id="c-district" value={createForm.district}
+                    onChange={e => setCreateForm(p => ({ ...p, district: e.target.value }))}
+                    placeholder="District name" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="address">Address</Label>
-                  <Input 
-                    id="address"
-                    value={createForm.address}
-                    onChange={(e) => setCreateForm(prev => ({ ...prev, address: e.target.value }))}
-                    placeholder="Physical address"
-                  />
+                  <Label htmlFor="c-address">Address</Label>
+                  <Input id="c-address" value={createForm.address}
+                    onChange={e => setCreateForm(p => ({ ...p, address: e.target.value }))}
+                    placeholder="Physical address" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="phone">Phone</Label>
-                  <Input 
-                    id="phone"
-                    value={createForm.phone}
-                    onChange={(e) => setCreateForm(prev => ({ ...prev, phone: e.target.value }))}
-                    placeholder="Clinic phone number"
-                  />
+                  <Label htmlFor="c-phone">Phone</Label>
+                  <Input id="c-phone" value={createForm.phone}
+                    onChange={e => setCreateForm(p => ({ ...p, phone: e.target.value }))}
+                    placeholder="Clinic phone number" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="clinic-email">Clinic Contact Email</Label>
-                  <Input 
-                    id="clinic-email"
-                    type="email"
-                    value={createForm.email}
-                    onChange={(e) => setCreateForm(prev => ({ ...prev, email: e.target.value }))}
-                    placeholder="clinic@facility.org (general contact email)"
-                  />
-                  <p className="text-[10px] text-slate-500">General contact email for the facility</p>
+                  <Label htmlFor="c-email">Clinic Contact Email</Label>
+                  <Input id="c-email" type="email" value={createForm.email}
+                    onChange={e => setCreateForm(p => ({ ...p, email: e.target.value }))}
+                    placeholder="clinic@facility.org" />
                 </div>
               </div>
-
-              <div className="flex items-center gap-4 pt-2">
+              <div className="flex items-center gap-6 pt-1">
                 <div className="flex items-center gap-2">
-                  <Checkbox 
-                    id="require-staff-id" 
-                    checked={createForm.require_staff_id}
-                    onCheckedChange={(v) => setCreateForm(prev => ({ ...prev, require_staff_id: !!v }))}
-                  />
-                  <Label htmlFor="require-staff-id">Require Staff ID</Label>
+                  <Checkbox id="req-staff" checked={createForm.require_staff_id}
+                    onCheckedChange={v => setCreateForm(p => ({ ...p, require_staff_id: !!v }))} />
+                  <Label htmlFor="req-staff">Require Staff ID</Label>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Checkbox 
-                    id="require-department" 
-                    checked={createForm.require_department}
-                    onCheckedChange={(v) => setCreateForm(prev => ({ ...prev, require_department: !!v }))}
-                  />
-                  <Label htmlFor="require-department">Require Department</Label>
+                  <Checkbox id="req-dept" checked={createForm.require_department}
+                    onCheckedChange={v => setCreateForm(p => ({ ...p, require_department: !!v }))} />
+                  <Label htmlFor="req-dept">Require Department</Label>
                 </div>
               </div>
-
-              <div className="border-t border-slate-200 pt-4">
-                <h3 className="font-semibold text-slate-800 mb-4">Clinic Administrator Account</h3>
-                <p className="text-sm text-slate-600 mb-4">Create the initial administrator account for this clinic. This user will have full access to manage the clinic and its staff.</p>
+              <div className="border-t pt-4">
+                <h3 className="font-semibold text-slate-800 dark:text-slate-200 mb-1">Clinic Administrator Account</h3>
+                <p className="text-sm text-slate-500 mb-4">Create the initial admin account for this clinic.</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="admin-email">Admin Email (Login)</Label>
-                    <Input 
-                      id="admin-email"
-                      type="email"
-                      value={createForm.admin_email}
-                      onChange={(e) => setCreateForm(prev => ({ ...prev, admin_email: e.target.value }))}
-                      required
-                      placeholder="admin@clinic.org"
-                    />
-                    <p className="text-[10px] text-slate-500">Email address for admin login</p>
+                    <Label htmlFor="a-email">Admin Email</Label>
+                    <Input id="a-email" type="email" value={createForm.admin_email}
+                      onChange={e => setCreateForm(p => ({ ...p, admin_email: e.target.value }))}
+                      required placeholder="admin@clinic.org" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="admin-name">Admin Name</Label>
-                    <Input 
-                      id="admin-name"
-                      value={createForm.admin_name}
-                      onChange={(e) => setCreateForm(prev => ({ ...prev, admin_name: e.target.value }))}
-                      required
-                      placeholder="Full name of clinic admin"
-                    />
+                    <Label htmlFor="a-name">Admin Name</Label>
+                    <Input id="a-name" value={createForm.admin_name}
+                      onChange={e => setCreateForm(p => ({ ...p, admin_name: e.target.value }))}
+                      required placeholder="Full name of clinic admin" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="admin-password">Initial Password</Label>
+                    <Label htmlFor="a-pass">Initial Password</Label>
                     <div className="relative">
-                      <Input
-                        id="admin-password"
+                      <Input id="a-pass"
                         type={showPassword ? "text" : "password"}
                         value={createForm.admin_temp_password}
-                        onChange={(e) => {
-                          const password = e.target.value
-                          setCreateForm(prev => ({ ...prev, admin_temp_password: password }))
-                          setPasswordError(validatePassword(password))
+                        onChange={e => {
+                          setCreateForm(p => ({ ...p, admin_temp_password: e.target.value }))
+                          setPasswordError(validatePassword(e.target.value))
                         }}
-                        required
-                        placeholder="Min 8 characters, uppercase, lowercase, digit, special"
-                        minLength={8}
-                      />
+                        required placeholder="Min 8 chars, upper, lower, digit, special"
+                        className="pr-10" />
+                      <button type="button" onClick={() => setShowPassword(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
                     </div>
-                    {passwordError && (
-                      <p className="text-xs text-red-500">{passwordError}</p>
-                    )}
+                    {passwordError && <p className="text-xs text-red-500">{passwordError}</p>}
                   </div>
                 </div>
-
-                {/* Conditional fields based on requirements */}
                 {createForm.require_staff_id && (
-                  <div className="space-y-2">
-                    <Label htmlFor="admin-staff-id">Admin Staff ID</Label>
-                    <Input
-                      id="admin-staff-id"
-                      value={createForm.admin_staff_id}
-                      onChange={(e) => setCreateForm(prev => ({ ...prev, admin_staff_id: e.target.value }))}
-                      required={createForm.require_staff_id}
-                      placeholder="Staff ID for authentication"
-                    />
-                    <p className="text-[10px] text-slate-500">Required when Staff ID is enforced for this clinic</p>
+                  <div className="mt-3 space-y-2">
+                    <Label htmlFor="a-staff">Admin Staff ID</Label>
+                    <Input id="a-staff" value={createForm.admin_staff_id}
+                      onChange={e => setCreateForm(p => ({ ...p, admin_staff_id: e.target.value }))}
+                      required placeholder="Staff ID for authentication" />
                   </div>
                 )}
-
                 {createForm.require_department && (
-                  <div className="space-y-2">
-                    <Label htmlFor="admin-department">Admin Department</Label>
-                    <Input
-                      id="admin-department"
-                      value={createForm.admin_department}
-                      onChange={(e) => setCreateForm(prev => ({ ...prev, admin_department: e.target.value }))}
-                      required={createForm.require_department}
-                      placeholder="Department (e.g., OPD, Pharmacy, Laboratory)"
-                    />
-                    <p className="text-[10px] text-slate-500">Required when Department is enforced for this clinic</p>
+                  <div className="mt-3 space-y-2">
+                    <Label htmlFor="a-dept">Admin Department</Label>
+                    <Input id="a-dept" value={createForm.admin_department}
+                      onChange={e => setCreateForm(p => ({ ...p, admin_department: e.target.value }))}
+                      required placeholder="e.g. OPD, Pharmacy, Laboratory" />
                   </div>
                 )}
               </div>
-
-              <div className="flex items-center gap-3 pt-4">
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => setIsCreateDialogOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  disabled={isLoading} 
-                  className="bg-emerald-600 hover:bg-emerald-700"
-                >
-                  {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Create Clinic
+              <div className="flex items-center gap-3 pt-2">
+                <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>Cancel</Button>
+                <Button type="submit" disabled={isLoading} className="bg-emerald-600 hover:bg-emerald-700">
+                  {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Create Clinic
                 </Button>
               </div>
             </form>
@@ -494,7 +526,7 @@ export function ClinicManagement() {
         </Card>
       )}
 
-      {isLoading ? (
+      {isLoading && !clinics.length ? (
         <div className="flex items-center justify-center p-8">
           <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
         </div>
@@ -503,110 +535,103 @@ export function ClinicManagement() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Building className="h-5 w-5 text-emerald-600" />
-              All Clinics
+              {isSuperAdmin ? `All Clinics (${clinics.length})` : "My Clinic"}
             </CardTitle>
             <CardDescription>
-              Overview of all registered healthcare facilities
+              {isSuperAdmin
+                ? "Click a clinic to expand its details and management options"
+                : "View and update your clinic information and admin contact details"}
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Code</TableHead>
-                  <TableHead>Country</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Users</TableHead>
-                  <TableHead className="text-right">Patients</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+          <CardContent className="pt-0">
+            {clinics.length === 0 ? (
+              <p className="text-sm text-slate-500 text-center py-6">No clinics found.</p>
+            ) : (
+              <Accordion type="multiple" className="w-full space-y-2">
                 {clinics.map((clinic) => (
-                  <TableRow key={clinic.id}>
-                    <TableCell className="font-medium">{clinic.name}</TableCell>
-                    <TableCell className="font-mono">{clinic.code}</TableCell>
-                    <TableCell>{clinic.country_code}</TableCell>
-                    <TableCell>
-                      <Badge 
-                        variant={clinic.is_active && !clinic.is_suspended ? "default" : "secondary"}
-                        className={
-                          clinic.is_suspended 
-                            ? "bg-yellow-500" 
-                            : clinic.is_active 
-                              ? "bg-emerald-600" 
-                              : "bg-slate-400"
-                        }
-                      >
-                        {clinic.is_suspended 
-                          ? "Suspended" 
-                          : clinic.is_active 
-                            ? "Active" 
-                            : "Inactive"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Users className="h-3 w-3 text-slate-500" />
-                        {clinic.user_count}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Activity className="h-3 w-3 text-slate-500" />
-                        {clinic.patient_count}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {clinic.is_suspended ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleUnsuspendClinic(clinic.id)}
-                            className="h-8 px-2"
+                  <AccordionItem
+                    key={clinic.id}
+                    value={clinic.id}
+                    className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden"
+                  >
+                    <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-slate-50 dark:hover:bg-slate-800/50 [&[data-state=open]]:bg-emerald-50 dark:[&[data-state=open]]:bg-emerald-950/20">
+                      <div className="flex items-center justify-between w-full pr-3">
+                        <div className="flex items-center gap-3 text-left">
+                          <div className="w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0">
+                            <Building className="h-4 w-4 text-emerald-600" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-slate-800 dark:text-slate-100 text-sm">{clinic.name}</p>
+                            <p className="text-xs text-slate-500 font-mono">{clinic.code} · {clinic.country_code}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1 text-xs text-slate-500">
+                            <Users className="h-3.5 w-3.5" />{clinic.user_count ?? 0}
+                            <Activity className="h-3.5 w-3.5 ml-2" />{clinic.patient_count ?? 0}
+                          </div>
+                          <Badge
+                            className={
+                              clinic.is_suspended
+                                ? "bg-yellow-500 text-white"
+                                : clinic.is_active
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-slate-400 text-white"
+                            }
                           >
-                            <CheckCircle className="h-4 w-4 mr-1" />
-                            Unsuspend
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleSuspendClinic(clinic.id)}
-                            className="h-8 px-2"
-                          >
-                            <Ban className="h-4 w-4 mr-1" />
-                            Suspend
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleArchiveClinic(clinic.id)}
-                          className="h-8 px-2"
-                        >
-                          <Archive className="h-4 w-4 mr-1" />
-                          Archive
-                        </Button>
-                        {clinic.is_demo_clinic && (
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => handleDeleteClinic(clinic.id, true)}
-                            className="h-8 px-2"
-                          >
-                            <Trash2 className="h-4 w-4 mr-1" />
-                            Delete
-                          </Button>
-                        )}
+                            {clinic.is_suspended ? "Suspended" : clinic.is_active ? "Active" : "Inactive"}
+                          </Badge>
+                        </div>
                       </div>
-                    </TableCell>
-                  </TableRow>
+                    </AccordionTrigger>
+
+                    <AccordionContent className="px-4 pb-5 pt-0">
+                      <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 mb-3 text-xs text-slate-500 dark:text-slate-400">
+                        {clinic.region && <span><span className="font-medium text-slate-600 dark:text-slate-300">Region:</span> {clinic.region}</span>}
+                        {clinic.district && <span><span className="font-medium text-slate-600 dark:text-slate-300">District:</span> {clinic.district}</span>}
+                        {clinic.email && <span><span className="font-medium text-slate-600 dark:text-slate-300">Email:</span> {clinic.email}</span>}
+                        {clinic.phone && <span><span className="font-medium text-slate-600 dark:text-slate-300">Phone:</span> {clinic.phone}</span>}
+                        {clinic.address && <span><span className="font-medium text-slate-600 dark:text-slate-300">Address:</span> {clinic.address}</span>}
+                      </div>
+
+                      {isSuperAdmin && (
+                        <>
+                          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 dark:border-slate-700 pt-3">
+                            <span className="text-xs text-slate-400 mr-1">Actions:</span>
+                            {clinic.is_suspended ? (
+                              <Button size="sm" variant="outline" onClick={() => handleSuspend(clinic.id, true)}
+                                className="h-8 text-xs gap-1">
+                                <CheckCircle className="h-3.5 w-3.5" /> Unsuspend
+                              </Button>
+                            ) : (
+                              <Button size="sm" variant="outline" onClick={() => handleSuspend(clinic.id, false)}
+                                className="h-8 text-xs gap-1 text-yellow-600 border-yellow-300 hover:bg-yellow-50">
+                                <Ban className="h-3.5 w-3.5" /> Suspend
+                              </Button>
+                            )}
+                            <Button size="sm" variant="outline" onClick={() => handleArchive(clinic.id)}
+                              className="h-8 text-xs gap-1">
+                              <Archive className="h-3.5 w-3.5" /> Archive
+                            </Button>
+                            {clinic.is_demo_clinic && (
+                              <Button size="sm" variant="destructive" onClick={() => handleDelete(clinic.id)}
+                                className="h-8 text-xs gap-1">
+                                <Trash2 className="h-3.5 w-3.5" /> Delete Demo
+                              </Button>
+                            )}
+                          </div>
+                          <AdminPasswordResetPanel clinic={clinic} />
+                        </>
+                      )}
+
+                      {isClinicAdmin && (
+                        <ClinicAdminEditPanel clinic={clinic} />
+                      )}
+                    </AccordionContent>
+                  </AccordionItem>
                 ))}
-              </TableBody>
-            </Table>
+              </Accordion>
+            )}
           </CardContent>
         </Card>
       )}

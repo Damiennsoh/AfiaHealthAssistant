@@ -69,7 +69,7 @@ export default function AuditLogsPage() {
   
   // Filters
   const [search, setSearch] = useState("")
-  const [action, setAction] = useState("")
+  const [action, setAction] = useState("all")
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
   const [offset, setOffset] = useState(0)
@@ -97,9 +97,9 @@ export default function AuditLogsPage() {
       const currentOffset = resetOffset ? 0 : offset
       const response = await afiaAPI.getAuditLogs({
         search: search || undefined,
-        action: action || undefined,
-        start_date: startDate || undefined,
-        end_date: endDate || undefined,
+        action: action === "all" ? undefined : action || undefined,
+        start_date: startDate ? new Date(startDate).toISOString() : undefined,
+        end_date: endDate ? new Date(endDate).toISOString() : undefined,
         offset: currentOffset,
         limit: 50,
       })
@@ -207,7 +207,7 @@ export default function AuditLogsPage() {
                   <SelectValue placeholder="All actions" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All actions</SelectItem>
+                  <SelectItem value="all">All actions</SelectItem>
                   {Object.entries(ACTION_LABELS).map(([key, label]) => (
                     <SelectItem key={key} value={key}>{label}</SelectItem>
                   ))}

@@ -578,6 +578,30 @@ class AfiaAPI {
     });
   }
 
+  async adminResetClinicAdminPassword(clinicId: string, newPassword: string) {
+    return this.request(`/api/v1/users/clinics/${clinicId}/reset-admin-password`, {
+      method: 'POST',
+      body: JSON.stringify({ new_password: newPassword }),
+    });
+  }
+
+  async updateOwnProfile(data: {
+    name?: string;
+    email?: string;
+    phone?: string;
+    clinic_name?: string;
+    clinic_email?: string;
+    clinic_phone?: string;
+    clinic_region?: string;
+    clinic_district?: string;
+    clinic_address?: string;
+  }) {
+    return this.request('/api/v1/users/me/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   // =========================================================================
   // SYNC (Offline Support)
   // =========================================================================
@@ -644,18 +668,6 @@ class AfiaAPI {
     });
   }
 
-  async updateOwnProfile(data: {
-    email?: string;
-    phone?: string;
-    clinic_name?: string;
-    clinic_email?: string;
-    clinic_phone?: string;
-  }) {
-    return this.request('/api/v1/users/me/profile', {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
 
   // =========================================================================
   // AUDIT LOGS
