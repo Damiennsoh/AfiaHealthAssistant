@@ -400,7 +400,7 @@ export function ClinicManagement() {
                   <Label htmlFor="c-name">Clinic Name</Label>
                   <Input id="c-name" value={createForm.name}
                     onChange={e => setCreateForm(p => ({ ...p, name: e.target.value }))}
-                    required placeholder="CHPS Compound, District Hospital…" />
+                    required placeholder="CHPS Compound, District Hospital..." />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="c-code">Clinic Code</Label>
@@ -562,7 +562,7 @@ export function ClinicManagement() {
                           </div>
                           <div>
                             <p className="font-semibold text-slate-800 dark:text-slate-100 text-sm">{clinic.name}</p>
-                            <p className="text-xs text-slate-500 font-mono">{clinic.code} · {clinic.country_code}</p>
+                            <p className="text-xs text-slate-500 font-mono">{clinic.code}  {clinic.country_code}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
@@ -637,4 +637,4 @@ export function ClinicManagement() {
       )}
     </div>
   )
-}
+}
