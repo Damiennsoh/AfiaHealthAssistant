@@ -128,8 +128,8 @@ class AfiaAPI {
       console.log('[AfiaAPI] Response status:', response.status);
       console.log('[AfiaAPI] Response ok:', response.ok);
 
-      // Handle token expiration
-      if (response.status === 401) {
+      // Handle token expiration (exclude login endpoint to avoid redirecting on wrong credentials)
+      if (response.status === 401 && !endpoint.includes('/auth/login')) {
         const refreshed = await this.refreshAccessToken();
         if (refreshed && retryCount < MAX_RETRIES) {
           // Retry with new token
