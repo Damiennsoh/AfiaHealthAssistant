@@ -110,6 +110,7 @@ class ClinicResponse(ClinicBase):
     features: Dict[str, Any]
     trial_ends_at: Optional[datetime] = None
     subscription_renews_at: Optional[datetime] = None
+    admin_email: Optional[str] = None
     created_at: datetime
     user_count: int = 0
     patient_count: int = 0

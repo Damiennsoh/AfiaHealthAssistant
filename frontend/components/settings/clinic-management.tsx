@@ -45,6 +45,7 @@ interface Clinic {
   created_at: string
   user_count: number
   patient_count: number
+  admin_email?: string
 }
 
 const validatePassword = (password: string): string | null => {
@@ -736,7 +737,8 @@ export function ClinicManagement() {
                       <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 mb-3 text-xs text-slate-500 dark:text-slate-400">
                         {clinic.region && <span><span className="font-medium text-slate-600 dark:text-slate-300">Region:</span> {clinic.region}</span>}
                         {clinic.district && <span><span className="font-medium text-slate-600 dark:text-slate-300">District:</span> {clinic.district}</span>}
-                        {clinic.email && <span><span className="font-medium text-slate-600 dark:text-slate-300">Email:</span> {clinic.email}</span>}
+                        {clinic.email && <span><span className="font-medium text-slate-600 dark:text-slate-300">Clinic Email:</span> {clinic.email}</span>}
+                        {clinic.admin_email && <span><span className="font-medium text-slate-600 dark:text-slate-300">Admin Email:</span> {clinic.admin_email}</span>}
                         {clinic.phone && <span><span className="font-medium text-slate-600 dark:text-slate-300">Phone:</span> {clinic.phone}</span>}
                         {clinic.address && <span><span className="font-medium text-slate-600 dark:text-slate-300">Address:</span> {clinic.address}</span>}
                       </div>

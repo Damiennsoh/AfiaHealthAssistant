@@ -83,6 +83,13 @@ async def list_clinics(
         resp = ClinicResponse.model_validate(clinic)
         resp.user_count = user_count.scalar()
         resp.patient_count = patient_count.scalar()
+        
+        if clinic.admin_user_id:
+            admin_user = await db.execute(select(User).where(User.id == clinic.admin_user_id))
+            admin_user = admin_user.scalar_one_or_none()
+            if admin_user:
+                resp.admin_email = admin_user.email
+
         responses.append(resp)
 
     return responses
@@ -157,7 +164,16 @@ async def get_clinic(
     if not clinic:
         raise HTTPException(status_code=404, detail="Clinic not found")
 
-    return ClinicResponse.model_validate(clinic)
+    resp = ClinicResponse.model_validate(clinic)
+    
+    from app.models.user import User
+    if clinic.admin_user_id:
+        admin_user = await db.execute(select(User).where(User.id == clinic.admin_user_id))
+        admin_user = admin_user.scalar_one_or_none()
+        if admin_user:
+            resp.admin_email = admin_user.email
+            
+    return resp
 
 
 @router.put("/{clinic_id}", response_model=ClinicResponse)
