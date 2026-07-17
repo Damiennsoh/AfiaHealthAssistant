@@ -18,7 +18,7 @@ import {
 import {
   Loader2, Plus, Building, Users, Activity, Ban, Archive,
   Trash2, CheckCircle, KeyRound, Eye, EyeOff, Save, RotateCcw,
-  Mail, Phone, MapPin, User
+  Mail, Phone, MapPin, User, ShieldAlert, Settings2
 } from "lucide-react"
 import { toast } from "sonner"
 import { afiaAPI } from "@/lib/afia-api"
@@ -248,10 +248,80 @@ function ClinicAdminEditPanel({ clinic }: { clinic: Clinic }) {
   )
 }
 
+function ClinicSettingsPanel({ clinic, onSaved }: { clinic: Clinic; onSaved: () => void }) {
+  const [requireStaffId, setRequireStaffId] = useState(clinic.require_staff_id)
+  const [requireDepartment, setRequireDepartment] = useState(clinic.require_department)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const hasChanges = requireStaffId !== clinic.require_staff_id || requireDepartment !== clinic.require_department
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      const res = await afiaAPI.updateClinic(clinic.id, {
+        require_staff_id: requireStaffId,
+        require_department: requireDepartment,
+      } as any)
+      if (res.error) throw new Error(String(res.error))
+      toast.success(`Login settings for ${clinic.name} updated.`)
+      onSaved()
+    } catch (e: any) {
+      toast.error(e.message || "Failed to update clinic settings")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-slate-200 dark:border-slate-700 pt-4">
+      <div className="flex items-center gap-2 mb-2">
+        <Settings2 className="h-4 w-4 text-blue-500" />
+        <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Login Requirements</span>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+        Control what fields staff must provide when logging into this clinic.
+      </p>
+      <div className="flex flex-col sm:flex-row gap-4 mb-3">
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <Checkbox
+            checked={requireStaffId}
+            onCheckedChange={(v) => setRequireStaffId(!!v)}
+            id={`staff-id-${clinic.id}`}
+          />
+          <span className="text-sm">Require Staff ID at login</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <Checkbox
+            checked={requireDepartment}
+            onCheckedChange={(v) => setRequireDepartment(!!v)}
+            id={`dept-${clinic.id}`}
+          />
+          <span className="text-sm">Require Department at login</span>
+        </label>
+      </div>
+      {hasChanges && (
+        <Button
+          size="sm"
+          disabled={isSaving}
+          onClick={handleSave}
+          className="bg-blue-600 hover:bg-blue-700 text-white h-8 text-xs gap-1"
+        >
+          {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          Save Settings
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export function ClinicManagement() {
   const { user } = useAuth()
   const isSuperAdmin = user?.role === "super_admin"
   const isClinicAdmin = user?.role === "clinic_admin"
+
+  // The AFIA Administration clinic is the superadmin's own system account
+  const isAdminClinic = (clinic: Clinic) =>
+    clinic.code === "ADMIN-001" || clinic.id === user?.clinic_id
 
   const [clinics, setClinics] = useState<Clinic[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -259,6 +329,10 @@ export function ClinicManagement() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
+
+  // Typed delete confirmation state
+  const [deleteTarget, setDeleteTarget] = useState<Clinic | null>(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState("")
 
   const emptyCreateForm = {
     name: "", code: "", country_code: "GH" as "GH" | "ZW",
@@ -351,12 +425,16 @@ export function ClinicManagement() {
   }
 
   const handleDelete = async (clinicId: string) => {
-    if (!confirm("Permanently delete this demo clinic? This cannot be undone.")) return
+    if (!deleteTarget || deleteConfirmText !== deleteTarget.name) return
     try {
       await afiaAPI.deleteClinic(clinicId)
-      toast.success("Demo clinic deleted")
+      toast.success("Clinic permanently deleted")
+      setDeleteTarget(null)
+      setDeleteConfirmText("")
       await loadClinics()
-    } catch { toast.error("Failed to delete clinic") }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete clinic")
+    }
   }
 
   if (!user || (!isSuperAdmin && !isClinicAdmin)) return null
@@ -382,6 +460,56 @@ export function ClinicManagement() {
       </div>
 
       {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+
+      {/* Typed Delete Confirmation Dialog */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <Trash2 className="h-5 w-5 text-red-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-slate-100">Delete Clinic</h3>
+                <p className="text-xs text-slate-500">This action is permanent and cannot be undone.</p>
+              </div>
+            </div>
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <p className="text-sm text-red-700 dark:text-red-400">
+                All patients, encounters, users and data associated with <strong>{deleteTarget.name}</strong> will be permanently erased.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm">
+                Type <span className="font-mono font-bold text-red-600">{deleteTarget.name}</span> to confirm:
+              </Label>
+              <Input
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder={deleteTarget.name}
+                className="border-red-300 focus:ring-red-500"
+              />
+            </div>
+            <div className="flex gap-3 pt-1">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => { setDeleteTarget(null); setDeleteConfirmText("") }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1 gap-1"
+                disabled={deleteConfirmText !== deleteTarget.name}
+                onClick={() => handleDelete(deleteTarget.id)}
+              >
+                <Trash2 className="h-4 w-4" /> Delete Permanently
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isCreateDialogOpen && (
         <Card>
@@ -548,20 +676,39 @@ export function ClinicManagement() {
               <p className="text-sm text-slate-500 text-center py-6">No clinics found.</p>
             ) : (
               <Accordion type="multiple" className="w-full space-y-2">
-                {clinics.map((clinic) => (
+                {clinics.map((clinic) => {
+                  const isAdmin = isAdminClinic(clinic)
+                  return (
                   <AccordionItem
                     key={clinic.id}
                     value={clinic.id}
-                    className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden"
+                    className={`border rounded-lg overflow-hidden ${
+                      isAdmin
+                        ? "border-emerald-300 dark:border-emerald-700 bg-emerald-50/40 dark:bg-emerald-950/10"
+                        : "border-slate-200 dark:border-slate-700"
+                    }`}
                   >
                     <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-slate-50 dark:hover:bg-slate-800/50 [&[data-state=open]]:bg-emerald-50 dark:[&[data-state=open]]:bg-emerald-950/20">
                       <div className="flex items-center justify-between w-full pr-3">
                         <div className="flex items-center gap-3 text-left">
-                          <div className="w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0">
-                            <Building className="h-4 w-4 text-emerald-600" />
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                            isAdmin
+                              ? "bg-emerald-600 text-white"
+                              : "bg-emerald-100 dark:bg-emerald-900/50"
+                          }`}>
+                            {isAdmin
+                              ? <ShieldAlert className="h-4 w-4" />
+                              : <Building className="h-4 w-4 text-emerald-600" />}
                           </div>
                           <div>
-                            <p className="font-semibold text-slate-800 dark:text-slate-100 text-sm">{clinic.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-slate-800 dark:text-slate-100 text-sm">{clinic.name}</p>
+                              {isAdmin && (
+                                <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded font-medium uppercase tracking-wide">
+                                  Global Admin
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-slate-500 font-mono">{clinic.code}  {clinic.country_code}</p>
                           </div>
                         </div>
@@ -596,30 +743,42 @@ export function ClinicManagement() {
 
                       {isSuperAdmin && (
                         <>
-                          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 dark:border-slate-700 pt-3">
-                            <span className="text-xs text-slate-400 mr-1">Actions:</span>
-                            {clinic.is_suspended ? (
-                              <Button size="sm" variant="outline" onClick={() => handleSuspend(clinic.id, true)}
+                          {/* AFIA Administration: show a protected notice, no destructive actions */}
+                          {isAdmin ? (
+                            <div className="flex items-center gap-2 border-t border-slate-200 dark:border-slate-700 pt-3 text-xs text-emerald-700 dark:text-emerald-400">
+                              <ShieldAlert className="h-4 w-4 shrink-0" />
+                              <span>This is the global administrator account. Suspend, archive, and delete actions are not available for this account.</span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 dark:border-slate-700 pt-3">
+                              <span className="text-xs text-slate-400 mr-1">Actions:</span>
+                              {clinic.is_suspended ? (
+                                <Button size="sm" variant="outline" onClick={() => handleSuspend(clinic.id, true)}
+                                  className="h-8 text-xs gap-1">
+                                  <CheckCircle className="h-3.5 w-3.5" /> Unsuspend
+                                </Button>
+                              ) : (
+                                <Button size="sm" variant="outline" onClick={() => handleSuspend(clinic.id, false)}
+                                  className="h-8 text-xs gap-1 text-yellow-600 border-yellow-300 hover:bg-yellow-50">
+                                  <Ban className="h-3.5 w-3.5" /> Suspend
+                                </Button>
+                              )}
+                              <Button size="sm" variant="outline" onClick={() => handleArchive(clinic.id)}
                                 className="h-8 text-xs gap-1">
-                                <CheckCircle className="h-3.5 w-3.5" /> Unsuspend
+                                <Archive className="h-3.5 w-3.5" /> Archive
                               </Button>
-                            ) : (
-                              <Button size="sm" variant="outline" onClick={() => handleSuspend(clinic.id, false)}
-                                className="h-8 text-xs gap-1 text-yellow-600 border-yellow-300 hover:bg-yellow-50">
-                                <Ban className="h-3.5 w-3.5" /> Suspend
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => { setDeleteTarget(clinic); setDeleteConfirmText("") }}
+                                className="h-8 w-8 p-0 ml-auto"
+                                title="Permanently delete this clinic"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
                               </Button>
-                            )}
-                            <Button size="sm" variant="outline" onClick={() => handleArchive(clinic.id)}
-                              className="h-8 text-xs gap-1">
-                              <Archive className="h-3.5 w-3.5" /> Archive
-                            </Button>
-                            {clinic.is_demo_clinic && (
-                              <Button size="sm" variant="destructive" onClick={() => handleDelete(clinic.id)}
-                                className="h-8 text-xs gap-1">
-                                <Trash2 className="h-3.5 w-3.5" /> Delete Demo
-                              </Button>
-                            )}
-                          </div>
+                            </div>
+                          )}
+                          {!isAdmin && <ClinicSettingsPanel clinic={clinic} onSaved={loadClinics} />}
                           <AdminPasswordResetPanel clinic={clinic} />
                         </>
                       )}
@@ -629,7 +788,8 @@ export function ClinicManagement() {
                       )}
                     </AccordionContent>
                   </AccordionItem>
-                ))}
+                  )
+                })}
               </Accordion>
             )}
           </CardContent>
@@ -637,4 +797,4 @@ export function ClinicManagement() {
       )}
     </div>
   )
-}
+}

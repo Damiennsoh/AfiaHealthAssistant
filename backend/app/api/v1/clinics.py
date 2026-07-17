@@ -314,7 +314,7 @@ async def delete_clinic(
     current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete clinic (hard delete - only for demo clinics)."""
+    """Hard-delete a clinic (super_admin only). The AFIA Administration clinic cannot be deleted."""
     from sqlalchemy import select
     from app.models.clinic import Clinic
     from app.services.audit_service import AuditService
@@ -325,10 +325,11 @@ async def delete_clinic(
     if not clinic:
         raise HTTPException(status_code=404, detail="Clinic not found")
 
-    if not clinic.is_demo_clinic:
+    # Protect the global administration clinic from deletion
+    if clinic.code == "ADMIN-001" or current_user.clinic_id == clinic_id:
         raise HTTPException(
-            status_code=400,
-            detail="Cannot hard delete non-demo clinics. Use archive endpoint instead."
+            status_code=403,
+            detail="The AFIA Administration account cannot be deleted."
         )
 
     # Log deletion before actual deletion
@@ -339,7 +340,7 @@ async def delete_clinic(
         clinic=clinic,
         resource_type="clinic",
         resource_id=str(clinic.id),
-        details={"deleted_by": current_user.email, "was_demo_clinic": True}
+        details={"deleted_by": current_user.email, "clinic_name": clinic.name, "was_demo_clinic": clinic.is_demo_clinic}
     )
 
     await db.delete(clinic)
