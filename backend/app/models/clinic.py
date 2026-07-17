@@ -10,7 +10,7 @@ from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Enum
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
-from app.models.base import BaseModel
+from app.models.base import BaseModel, SoftDeleteMixin
 
 
 class SubscriptionTier(str, PyEnum):
@@ -28,7 +28,7 @@ class SubscriptionStatus(str, PyEnum):
     SUSPENDED = "suspended"
 
 
-class Clinic(BaseModel):
+class Clinic(BaseModel, SoftDeleteMixin):
     """Clinic/Health facility — the tenant unit."""
     __tablename__ = "clinics"
 
@@ -83,6 +83,9 @@ class Clinic(BaseModel):
     archived_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     is_demo_clinic = Column(Boolean, default=False)
 
+    # Soft delete — row is hidden but never destroyed (preserves audit trails and FK integrity)
+    # NOTE: The `is_deleted` column is inherited from SoftDeleteMixin
+
     # Relationships
     users = relationship("User", foreign_keys="User.clinic_id", back_populates="clinic", cascade="all, delete-orphan")
     patients = relationship("Patient", back_populates="clinic", cascade="all, delete-orphan")
@@ -122,13 +125,15 @@ class Clinic(BaseModel):
         self.is_active = True
 
     def archive(self, user_id: uuid.UUID) -> None:
-        """Archive clinic (soft delete)."""
+        """Archive clinic (suspension-level soft delete)."""
         self.archived_at = datetime.now(timezone.utc)
         self.archived_by = user_id
         self.is_active = False
 
-    def delete(self) -> None:
-        """Hard delete clinic (only for demo clinics)."""
-        if not self.is_demo_clinic:
-            raise ValueError("Cannot hard delete non-demo clinics. Use archive() instead.")
-        # This will cascade delete all related data
+    def soft_delete(self) -> None:
+        """
+        Full soft-delete: hides the clinic from ALL queries and UI.
+        Row is never destroyed — preserves audit logs and FK integrity.
+        """
+        self.is_deleted = True
+        self.is_active = False

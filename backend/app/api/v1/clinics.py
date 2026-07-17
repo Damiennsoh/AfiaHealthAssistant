@@ -28,7 +28,7 @@ async def list_public_clinics(
     
     Filter by country code and/or search by name or code.
     """
-    query = select(Clinic).where(Clinic.is_active == True)
+    query = select(Clinic).where(and_(Clinic.is_active == True, Clinic.is_deleted == False))
     
     if country_code:
         query = query.where(Clinic.country_code == country_code.upper())
@@ -52,7 +52,7 @@ async def get_public_clinic_by_code(
     db: AsyncSession = Depends(get_db),
 ):
     """Public/unauthenticated endpoint to get a clinic by its code."""
-    result = await db.execute(select(Clinic).where(and_(Clinic.code == clinic_code.upper(), Clinic.is_active == True)))
+    result = await db.execute(select(Clinic).where(and_(Clinic.code == clinic_code.upper(), Clinic.is_active == True, Clinic.is_deleted == False)))
     clinic = result.scalar_one_or_none()
     
     if not clinic:
@@ -71,7 +71,7 @@ async def list_clinics(
     from app.models.clinic import Clinic
     from app.models.patient import Patient
 
-    result = await db.execute(select(Clinic))
+    result = await db.execute(select(Clinic).where(Clinic.is_deleted == False))
     clinics = result.scalars().all()
 
     # Add counts
@@ -160,7 +160,7 @@ async def get_clinic(
     if current_user.role != UserRole.SUPER_ADMIN and current_user.clinic_id != clinic_id:
         raise HTTPException(status_code=403, detail="Cannot access other clinics")
 
-    result = await db.execute(select(Clinic).where(Clinic.id == clinic_id))
+    result = await db.execute(select(Clinic).where(and_(Clinic.id == clinic_id, Clinic.is_deleted == False)))
     clinic = result.scalar_one_or_none()
     if not clinic:
         raise HTTPException(status_code=404, detail="Clinic not found")
@@ -349,7 +349,7 @@ async def delete_clinic(
             detail="The AFIA Administration account cannot be deleted."
         )
 
-    # Log deletion before actual deletion
+    # Log deletion before soft-deleting
     audit_service = AuditService(db)
     await audit_service.log(
         action=AuditAction.CLINIC_DELETED,
@@ -360,13 +360,9 @@ async def delete_clinic(
         details={"deleted_by": current_user.email, "clinic_name": clinic.name, "was_demo_clinic": clinic.is_demo_clinic}
     )
 
-    # Break the circular FK: clinics.admin_user_id → users.id
-    # Without this, PostgreSQL raises a FK violation because users.clinic_id (CASCADE)
-    # tries to delete users that are still referenced by clinics.admin_user_id
-    clinic.admin_user_id = None
-    await db.flush()
-
-    await db.delete(clinic)
+    # Soft delete: hide the clinic from all queries without destroying any rows.
+    # This prevents circular FK constraint violations and preserves audit history.
+    clinic.soft_delete()
     await db.commit()
 
     return {"message": "Clinic deleted successfully"}
