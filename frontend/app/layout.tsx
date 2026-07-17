@@ -2,6 +2,7 @@ import React from "react"
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Toaster } from '@/components/ui/toaster'
+import { Toaster as SonnerToaster } from '@/components/ui/sonner'
 import { AuthProvider } from '@/contexts/AfiaAuthContext'
 import { SyncProvider } from '@/contexts/SyncContext'
 import AuthWrapper from '@/components/auth/AuthWrapper'
@@ -63,6 +64,7 @@ export default function RootLayout({
             </SyncProvider>
           </AuthProvider>
           <Toaster />
+          <SonnerToaster position="top-right" richColors />
           <ServiceWorkerRegister />
         </ThemeProvider>
       </body>
