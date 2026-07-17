@@ -112,7 +112,7 @@ class PasswordChange(BaseModel):
 
 class PasswordResetRequest(BaseModel):
     """Admin-initiated password reset."""
-    user_id: UUID
+    user_id: Optional[UUID] = None
     new_password: str = Field(..., min_length=12, max_length=128)
 
     @field_validator("new_password")
