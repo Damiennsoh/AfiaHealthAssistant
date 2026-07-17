@@ -139,6 +139,7 @@ async def create_clinic(
         department=data.admin_department if data.require_department else None,
     )
     db.add(admin)
+    await db.flush()
 
     clinic.admin_user_id = admin.id
     await db.commit()
