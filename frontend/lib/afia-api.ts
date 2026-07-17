@@ -581,10 +581,7 @@ class AfiaAPI {
   async adminResetClinicAdminPassword(clinicId: string, newPassword: string) {
     return this.request(`/api/v1/users/clinics/${clinicId}/reset-admin-password`, {
       method: 'POST',
-      body: JSON.stringify({ 
-        user_id: "00000000-0000-0000-0000-000000000000", // Dummy UUID to satisfy strict Pydantic validation on live backend
-        new_password: newPassword 
-      }),
+      body: JSON.stringify({ new_password: newPassword }),
     });
   }
 

@@ -111,8 +111,7 @@ class PasswordChange(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
-    """Admin-initiated password reset."""
-    user_id: Optional[UUID] = None
+    """Admin-initiated password reset. user_id comes from URL path, not request body."""
     new_password: str = Field(..., min_length=12, max_length=128)
 
     @field_validator("new_password")

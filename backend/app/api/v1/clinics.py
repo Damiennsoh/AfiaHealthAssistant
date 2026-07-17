@@ -360,6 +360,12 @@ async def delete_clinic(
         details={"deleted_by": current_user.email, "clinic_name": clinic.name, "was_demo_clinic": clinic.is_demo_clinic}
     )
 
+    # Break the circular FK: clinics.admin_user_id → users.id
+    # Without this, PostgreSQL raises a FK violation because users.clinic_id (CASCADE)
+    # tries to delete users that are still referenced by clinics.admin_user_id
+    clinic.admin_user_id = None
+    await db.flush()
+
     await db.delete(clinic)
     await db.commit()
 
