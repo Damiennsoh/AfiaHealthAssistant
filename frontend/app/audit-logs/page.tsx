@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Download, Search, Filter, FileText, ArrowLeft } from "lucide-react"
+import { Loader2, Download, Search, Filter, FileText, ArrowLeft, Home } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/AfiaAuthContext"
 import { afiaAPI } from "@/lib/afia-api"
@@ -165,15 +165,28 @@ export default function AuditLogsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="md:hidden shrink-0"
-            onClick={() => router.back()}
-          >
-            <ArrowLeft className="h-5 w-5" />
-            <span className="sr-only">Go back</span>
-          </Button>
+          <div className="flex bg-muted rounded-md p-1 shrink-0">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-sm"
+              onClick={() => router.back()}
+              title="Go back"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="sr-only">Go back</span>
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 rounded-sm"
+              onClick={() => router.push('/')}
+              title="Go home"
+            >
+              <Home className="h-4 w-4" />
+              <span className="sr-only">Go home</span>
+            </Button>
+          </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Audit Logs</h1>
             <p className="text-muted-foreground text-sm sm:text-base">
@@ -284,69 +297,10 @@ export default function AuditLogsPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              {/* Desktop Table View */}
-              <div className="hidden md:block overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[150px]">Timestamp</TableHead>
-                      <TableHead className="min-w-[120px]">Action</TableHead>
-                      <TableHead className="min-w-[150px]">User</TableHead>
-                      <TableHead className="min-w-[150px]">Clinic</TableHead>
-                      <TableHead className="min-w-[120px]">Resource</TableHead>
-                      <TableHead className="min-w-[200px]">Details</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {logs.map((log) => (
-                      <TableRow key={log.id}>
-                        <TableCell className="text-sm">
-                          {formatDate(log.created_at)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge 
-                            variant="secondary" 
-                            className={`${ACTION_COLORS[log.action] || "bg-gray-500"} text-white`}
-                          >
-                            {getActionLabel(log.action)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {log.user_email || "-"}
-                          {log.user_role && (
-                            <span className="text-muted-foreground text-xs ml-2">
-                              ({log.user_role})
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {log.clinic_name || "-"}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {log.resource_type || "-"}
-                          {log.resource_id && (
-                            <span className="text-muted-foreground text-xs ml-2">
-                              ({log.resource_id.slice(0, 8)}...)
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm max-w-xs truncate">
-                          {log.details && Object.keys(log.details).length > 0 ? (
-                            <span className="text-muted-foreground" title={JSON.stringify(log.details)}>
-                              {JSON.stringify(log.details).slice(0, 50)}...
-                            </span>
-                          ) : "-"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {/* Mobile Card View */}
-              <div className="grid grid-cols-1 gap-4 md:hidden">
+              {/* Universal Mobile-First Card View */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {logs.map((log) => (
-                  <div key={log.id} className="bg-card border rounded-lg p-4 space-y-3">
+                  <div key={log.id} className="bg-card border rounded-lg p-4 space-y-3 shadow-sm hover:shadow-md transition-shadow">
                     <div className="flex justify-between items-start">
                       <Badge 
                         variant="secondary" 
@@ -354,32 +308,32 @@ export default function AuditLogsPage() {
                       >
                         {getActionLabel(log.action)}
                       </Badge>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs text-muted-foreground font-medium">
                         {formatDate(log.created_at)}
                       </span>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="grid grid-cols-2 gap-3 text-sm bg-muted/50 p-3 rounded-md">
                       <div>
-                        <span className="text-muted-foreground block text-xs">User</span>
+                        <span className="text-muted-foreground block text-xs uppercase tracking-wider mb-1">User</span>
                         <div className="font-medium truncate" title={log.user_email || ""}>{log.user_email || "-"}</div>
                       </div>
                       <div>
-                        <span className="text-muted-foreground block text-xs">Clinic</span>
+                        <span className="text-muted-foreground block text-xs uppercase tracking-wider mb-1">Clinic</span>
                         <div className="font-medium truncate" title={log.clinic_name || ""}>{log.clinic_name || "-"}</div>
                       </div>
-                      <div>
-                        <span className="text-muted-foreground block text-xs">Resource</span>
+                      <div className="col-span-2 border-t pt-2 mt-1">
+                        <span className="text-muted-foreground block text-xs uppercase tracking-wider mb-1">Resource</span>
                         <div className="font-medium truncate">
-                          {log.resource_type || "-"}
+                          {log.resource_type || "-"} {log.resource_id ? <span className="text-muted-foreground font-normal text-xs ml-1">({log.resource_id.slice(0, 8)}...)</span> : null}
                         </div>
                       </div>
                     </div>
                     
                     {log.details && Object.keys(log.details).length > 0 && (
-                      <div className="pt-2 border-t mt-2">
-                        <span className="text-muted-foreground block text-xs mb-1">Details</span>
-                        <div className="text-xs bg-muted p-2 rounded break-all whitespace-pre-wrap">
+                      <div className="pt-2">
+                        <span className="text-muted-foreground block text-xs uppercase tracking-wider mb-1">Details</span>
+                        <div className="text-xs bg-muted p-2.5 rounded-md break-all whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">
                           {JSON.stringify(log.details, null, 2)}
                         </div>
                       </div>
