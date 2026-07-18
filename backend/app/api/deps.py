@@ -51,9 +51,16 @@ async def get_current_user(
 
 
 async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
-    """Verify user is active."""
+    """Verify user is active and their clinic is active."""
     if not current_user.is_active:
         raise AuthenticationError("Inactive user")
+
+    if current_user.clinic:
+        if current_user.clinic.is_suspended:
+            raise AuthenticationError("Your clinic has been suspended. Please contact support.")
+        if current_user.clinic.is_deleted or current_user.clinic.is_archived:
+            raise AuthenticationError("Your clinic is no longer active.")
+
     return current_user
 
 

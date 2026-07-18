@@ -79,6 +79,7 @@ class Clinic(BaseModel, SoftDeleteMixin):
     is_suspended = Column(Boolean, default=False)
     suspended_at = Column(DateTime(timezone=True), nullable=True)
     suspended_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    is_archived = Column(Boolean, default=False, nullable=False, server_default="false")
     archived_at = Column(DateTime(timezone=True), nullable=True)
     archived_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     is_demo_clinic = Column(Boolean, default=False)
@@ -126,9 +127,17 @@ class Clinic(BaseModel, SoftDeleteMixin):
 
     def archive(self, user_id: uuid.UUID) -> None:
         """Archive clinic (suspension-level soft delete)."""
+        self.is_archived = True
         self.archived_at = datetime.now(timezone.utc)
         self.archived_by = user_id
         self.is_active = False
+
+    def restore_from_archive(self) -> None:
+        """Restore an archived clinic."""
+        self.is_archived = False
+        self.archived_at = None
+        self.archived_by = None
+        self.is_active = True
 
     def soft_delete(self) -> None:
         """

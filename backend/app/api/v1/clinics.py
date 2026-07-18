@@ -63,15 +63,20 @@ async def get_public_clinic_by_code(
 
 @router.get("/", response_model=List[ClinicResponse])
 async def list_clinics(
+    show_archived: bool = False,
     current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """List all clinics (super_admin only)."""
-    from sqlalchemy import select, func
+    from sqlalchemy import select, func, and_
     from app.models.clinic import Clinic
     from app.models.patient import Patient
 
-    result = await db.execute(select(Clinic).where(Clinic.is_deleted == False))
+    query = select(Clinic).where(Clinic.is_deleted == False)
+    if not show_archived:
+        query = query.where(Clinic.is_archived == False)
+
+    result = await db.execute(query)
     clinics = result.scalars().all()
 
     # Add counts
@@ -240,10 +245,7 @@ async def suspend_clinic(
     if not clinic:
         raise HTTPException(status_code=404, detail="Clinic not found")
 
-    clinic.suspend(current_user.id)
-    await db.commit()
-
-    # Log suspension
+    # Log suspension before committing state change
     audit_service = AuditService(db)
     await audit_service.log(
         action=AuditAction.CLINIC_SUSPENDED,
@@ -253,6 +255,9 @@ async def suspend_clinic(
         resource_id=str(clinic.id),
         details={"suspended_by": current_user.email}
     )
+
+    clinic.suspend(current_user.id)
+    await db.commit()
 
     return ClinicResponse.model_validate(clinic)
 
@@ -274,10 +279,7 @@ async def unsuspend_clinic(
     if not clinic:
         raise HTTPException(status_code=404, detail="Clinic not found")
 
-    clinic.unsuspend()
-    await db.commit()
-
-    # Log unsuspension
+    # Log unsuspension before committing state change
     audit_service = AuditService(db)
     await audit_service.log(
         action=AuditAction.CLINIC_UNSUSPENDED,
@@ -287,6 +289,9 @@ async def unsuspend_clinic(
         resource_id=str(clinic.id),
         details={"unsuspended_by": current_user.email}
     )
+
+    clinic.unsuspend()
+    await db.commit()
 
     return ClinicResponse.model_validate(clinic)
 
@@ -308,10 +313,7 @@ async def archive_clinic(
     if not clinic:
         raise HTTPException(status_code=404, detail="Clinic not found")
 
-    clinic.archive(current_user.id)
-    await db.commit()
-
-    # Log archival
+    # Log archival before committing state change
     audit_service = AuditService(db)
     await audit_service.log(
         action=AuditAction.CLINIC_ARCHIVED,
@@ -321,6 +323,9 @@ async def archive_clinic(
         resource_id=str(clinic.id),
         details={"archived_by": current_user.email}
     )
+
+    clinic.archive(current_user.id)
+    await db.commit()
 
     return ClinicResponse.model_validate(clinic)
 
@@ -349,6 +354,16 @@ async def delete_clinic(
             detail="The AFIA Administration account cannot be deleted."
         )
 
+    # Prevent deleting if patients exist
+    from sqlalchemy import func
+    from app.models.patient import Patient
+    patient_count = await db.execute(select(func.count()).select_from(Patient).where(Patient.clinic_id == clinic_id))
+    if patient_count.scalar() > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot permanently delete a clinic with patient data. Please Archive instead."
+        )
+
     # Log deletion before soft-deleting
     audit_service = AuditService(db)
     await audit_service.log(
@@ -357,7 +372,7 @@ async def delete_clinic(
         clinic=clinic,
         resource_type="clinic",
         resource_id=str(clinic.id),
-        details={"deleted_by": current_user.email, "clinic_name": clinic.name, "was_demo_clinic": clinic.is_demo_clinic}
+        details={"deleted_by": current_user.email, "clinic_name": clinic.name, "was_demo_clinic": clinic.is_demo_clinic, "type": "permanent_soft_delete"}
     )
 
     # Soft delete: hide the clinic from all queries without destroying any rows.

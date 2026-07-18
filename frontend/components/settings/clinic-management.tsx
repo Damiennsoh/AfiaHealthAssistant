@@ -36,6 +36,7 @@ interface Clinic {
   email?: string
   is_active: boolean
   is_suspended: boolean
+  is_archived: boolean
   is_demo_clinic: boolean
   require_staff_id: boolean
   require_department: boolean
@@ -722,12 +723,14 @@ export function ClinicManagement() {
                             className={
                               clinic.is_suspended
                                 ? "bg-yellow-500 text-white"
-                                : clinic.is_active
-                                  ? "bg-emerald-600 text-white"
-                                  : "bg-slate-400 text-white"
+                                : clinic.is_archived
+                                  ? "bg-slate-500 text-white"
+                                  : clinic.is_active
+                                    ? "bg-emerald-600 text-white"
+                                    : "bg-slate-400 text-white"
                             }
                           >
-                            {clinic.is_suspended ? "Suspended" : clinic.is_active ? "Active" : "Inactive"}
+                            {clinic.is_suspended ? "Suspended" : clinic.is_archived ? "Archived" : clinic.is_active ? "Active" : "Inactive"}
                           </Badge>
                         </div>
                       </div>

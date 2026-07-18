@@ -496,8 +496,8 @@ class AfiaAPI {
   // CLINICS (Admin only)
   // =========================================================================
 
-  async listClinics() {
-    return this.request('/api/v1/clinics/');
+  async listClinics(showArchived: boolean = false) {
+    return this.request(`/api/v1/clinics/?show_archived=${showArchived}`);
   }
 
   async createClinic(data: {

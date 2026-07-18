@@ -74,7 +74,7 @@ class Settings(BaseSettings):
 
     # ── API ──────────────────────────────────────────────────
     api_port: int = Field(default=8000)
-    cors_origins: str = Field(default="http://localhost:3000")
+    cors_origins: str = Field(default="http://localhost:3000,https://afiahealthassistant-1j.vercel.app")
 
     @property
     def cors_origins_list(self) -> List[str]:
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
         if isinstance(self.cors_origins, list):
             return self.cors_origins
-        return ["http://localhost:3000"]
+        return ["http://localhost:3000", "https://afiahealthassistant-1j.vercel.app"]
 
     @property
     def async_database_url(self) -> str:
