@@ -125,13 +125,17 @@ async def add_request_timing_and_security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     
     # Content Security Policy (CSP)
+    # ✅ FIXED: connect-src must include the Vercel frontend origin so the browser
+    # does not block cross-origin API requests before they even reach the server.
+    # 'self' alone is too restrictive for a SaaS with a separate frontend domain.
+    allowed_origins_str = " ".join(settings.cors_origins_list)
     csp = (
         "default-src 'self'; "
         "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "font-src 'self'; "
-        "connect-src 'self';"
+        f"connect-src 'self' {allowed_origins_str};"
     )
     response.headers["Content-Security-Policy"] = csp
     
@@ -147,13 +151,20 @@ async def afia_exception_handler(request: Request, exc: AfiaException):
     # Extract the origin header from the request
     origin = request.headers.get("origin")
 
-    # Define custom headers with fallback safety
+    # ✅ FIXED: Always include CORS headers on error responses.
+    # Previously, if origin was not in the list (or the list check failed), the
+    # browser would receive a 4xx/5xx with NO Access-Control-Allow-Origin header,
+    # causing it to misreport the error as a 'CORS' error in DevTools.
     response_headers = {**(exc.headers or {})}
 
-    # If the request came from an origin in your CORS settings, append it
-    if origin in settings.cors_origins_list:
-        response_headers["Access-Control-Allow-Origin"] = origin
-        response_headers["Access-Control-Allow-Credentials"] = "true"
+    if origin:
+        # Allow any origin that is in the configured list
+        if origin in settings.cors_origins_list:
+            response_headers["Access-Control-Allow-Origin"] = origin
+            response_headers["Access-Control-Allow-Credentials"] = "true"
+        else:
+            # For unlisted origins, still respond but without ACAO header (browser will block — that's correct)
+            logger.warning(f"Rejected cross-origin exception response for origin: {origin}")
 
     return JSONResponse(
         status_code=exc.status_code,

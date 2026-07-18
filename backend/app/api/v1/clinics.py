@@ -313,6 +313,10 @@ async def archive_clinic(
     if not clinic:
         raise HTTPException(status_code=404, detail="Clinic not found")
 
+    # Protect admin clinic from archiving
+    if clinic.code == "ADMIN-001":
+        raise HTTPException(status_code=403, detail="Cannot archive admin clinic")
+
     # Log archival before committing state change
     audit_service = AuditService(db)
     await audit_service.log(
