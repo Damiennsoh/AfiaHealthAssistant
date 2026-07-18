@@ -758,8 +758,12 @@ export function ClinicManagement() {
                             <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 dark:border-slate-700 pt-3">
                               <span className="text-xs text-slate-400 mr-1">Actions:</span>
                               {clinic.is_suspended ? (
-                                <Button size="sm" variant="outline" onClick={() => handleSuspend(clinic.id, true)}
-                                  className="h-8 text-xs gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleSuspend(clinic.id, true)}
+                                  className="h-8 text-xs gap-1 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800"
+                                >
                                   <CheckCircle className="h-3.5 w-3.5" /> Unsuspend
                                 </Button>
                               ) : (
