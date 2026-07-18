@@ -28,7 +28,7 @@ async def list_public_clinics(
     
     Filter by country code and/or search by name or code.
     """
-    query = select(Clinic).where(and_(Clinic.is_active == True, Clinic.is_deleted == False))
+    query = select(Clinic).where(and_(Clinic.is_active == True, Clinic.is_deleted == False, Clinic.is_archived == False))
     
     if country_code:
         query = query.where(Clinic.country_code == country_code.upper())
@@ -52,7 +52,7 @@ async def get_public_clinic_by_code(
     db: AsyncSession = Depends(get_db),
 ):
     """Public/unauthenticated endpoint to get a clinic by its code."""
-    result = await db.execute(select(Clinic).where(and_(Clinic.code == clinic_code.upper(), Clinic.is_active == True, Clinic.is_deleted == False)))
+    result = await db.execute(select(Clinic).where(and_(Clinic.code == clinic_code.upper(), Clinic.is_active == True, Clinic.is_deleted == False, Clinic.is_archived == False)))
     clinic = result.scalar_one_or_none()
     
     if not clinic:
