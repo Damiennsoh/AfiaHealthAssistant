@@ -5,11 +5,9 @@ Each clinic subscribes to the service. Data is isolated by clinic_id.
 import uuid
 from datetime import datetime, timezone
 from enum import Enum as PyEnum
-
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Enum, Integer
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
-
 from app.models.base import BaseModel, SoftDeleteMixin
 
 
@@ -35,17 +33,17 @@ class Clinic(BaseModel, SoftDeleteMixin):
     # Identity
     name = Column(String(255), nullable=False)
     code = Column(String(50), unique=True, nullable=False, index=True)  # e.g., "ACCRA-001"
-
+    
     # Country context (determines knowledge base)
     country_code = Column(String(2), nullable=False, index=True)  # "GH" or "ZW"
     region = Column(String(100), nullable=True)  # Region/province
     district = Column(String(100), nullable=True)  # District
-
+    
     # Contact
     address = Column(Text, nullable=True)
     phone = Column(String(50), nullable=True)
     email = Column(String(255), nullable=True)
-
+    
     # Subscription (SaaS billing)
     tier = Column(Enum(SubscriptionTier), default=SubscriptionTier.BASIC)
     status = Column(Enum(SubscriptionStatus), default=SubscriptionStatus.TRIAL)
@@ -53,37 +51,40 @@ class Clinic(BaseModel, SoftDeleteMixin):
     stripe_subscription_id = Column(String(255), nullable=True)
     trial_ends_at = Column(DateTime(timezone=True), nullable=True)
     subscription_renews_at = Column(DateTime(timezone=True), nullable=True)
-
+    
     # Usage limits
     max_users = Column(Integer, default=5)  # Staff accounts
     max_patients = Column(Integer, default=10000)
     max_storage_mb = Column(Integer, default=1024)  # MinIO storage
-
+    
     # Offline PWA config (for PRO tier)
     offline_enabled = Column(Boolean, default=False)
     offline_device_limit = Column(Integer, default=3)  # Max devices for offline sync
     last_offline_sync = Column(DateTime(timezone=True), nullable=True)
-
+    
     # Features
     features = Column(JSONB, default=dict)  # {"analytics": true, "custom_reports": false}
     
     # Validation requirements for login
     require_staff_id = Column(Boolean, default=False)
     require_department = Column(Boolean, default=False)
-
+    
     # Admin
     admin_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     is_active = Column(Boolean, default=True)
-
+    
     # Suspension & Archival (for subscription management)
     is_suspended = Column(Boolean, default=False)
     suspended_at = Column(DateTime(timezone=True), nullable=True)
     suspended_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    
+    # ✅ ADDED: Explicit archive flag matching DB migration
     is_archived = Column(Boolean, default=False, nullable=False, server_default="false")
     archived_at = Column(DateTime(timezone=True), nullable=True)
     archived_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    
     is_demo_clinic = Column(Boolean, default=False)
-
+    
     # Soft delete — row is hidden but never destroyed (preserves audit trails and FK integrity)
     # NOTE: The `is_deleted` column is inherited from SoftDeleteMixin
 
@@ -112,32 +113,27 @@ class Clinic(BaseModel, SoftDeleteMixin):
         return self.tier in [SubscriptionTier.PRO, SubscriptionTier.ENTERPRISE] and self.offline_enabled
 
     def suspend(self, user_id: uuid.UUID) -> None:
-        """Suspend clinic (reversible)."""
+        """Suspend clinic (reversible). Blocks access due to non-payment/admin hold."""
         self.is_suspended = True
         self.suspended_at = datetime.now(timezone.utc)
         self.suspended_by = user_id
         self.is_active = False
 
     def unsuspend(self) -> None:
-        """Unsuspend clinic (reactivate)."""
+        """Unsuspend clinic (reactivate). Restores access upon payment/resolution."""
         self.is_suspended = False
         self.suspended_at = None
         self.suspended_by = None
         self.is_active = True
 
     def archive(self, user_id: uuid.UUID) -> None:
-        """Archive clinic (suspension-level soft delete)."""
+        """Archive clinic (end-of-life). Hides from UI, preserves data for compliance."""
+        # ✅ FIXED: Now sets is_archived = True so frontend/backend filters work
         self.is_archived = True
         self.archived_at = datetime.now(timezone.utc)
         self.archived_by = user_id
         self.is_active = False
-
-    def restore_from_archive(self) -> None:
-        """Restore an archived clinic."""
-        self.is_archived = False
-        self.archived_at = None
-        self.archived_by = None
-        self.is_active = True
+        # Note: We do NOT touch is_deleted here. Archiving ≠ Deletion.
 
     def soft_delete(self) -> None:
         """
