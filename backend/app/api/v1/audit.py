@@ -40,7 +40,7 @@ async def get_audit_logs(
     audit_service = AuditService(db)
     
     # Regular staff cannot access audit logs
-    if current_user.role == UserRole.STAFF:
+    if current_user.role == UserRole.HEALTHWORKER:
         raise HTTPException(status_code=403, detail="Access denied")
     
     # Build query based on user role
