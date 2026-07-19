@@ -48,6 +48,7 @@ class AuditAction(str, PyEnum):
     USER_DELETED = "user_deleted"
     USER_PROFILE_UPDATED = "user_profile_updated"
     ADMIN_PASSWORD_RESET = "admin_password_reset"
+    CLINIC_CREATED = "clinic_created"
     CLINIC_UPDATED = "clinic_updated"
     CLINIC_SUSPENDED = "clinic_suspended"
     CLINIC_UNSUSPENDED = "clinic_unsuspended"

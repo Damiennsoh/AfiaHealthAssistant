@@ -110,6 +110,8 @@ async def create_clinic(
     from app.models.clinic import Clinic, SubscriptionStatus, SubscriptionTier
     from app.models.user import User
     from app.core.security import get_password_hash
+    from app.services.audit_service import AuditService
+    from app.models.audit import AuditAction
 
     # Create clinic
     # Subscription tier disabled for now - will be implemented later
@@ -147,6 +149,25 @@ async def create_clinic(
     await db.flush()
 
     clinic.admin_user_id = admin.id
+
+    # Log clinic creation before committing
+    audit_service = AuditService(db)
+    await audit_service.log(
+        action=AuditAction.CLINIC_CREATED,
+        user=current_user,
+        clinic=clinic,
+        resource_type="clinic",
+        resource_id=str(clinic.id),
+        details={
+            "created_by": current_user.email,
+            "clinic_name": clinic.name,
+            "clinic_code": clinic.code,
+            "country_code": clinic.country_code,
+            "admin_email": data.admin_email,
+            "tier": clinic.tier.value if clinic.tier else None
+        }
+    )
+
     await db.commit()
 
     return ClinicResponse.model_validate(clinic)

@@ -47,6 +47,7 @@ async def get_audit_logs(
     if current_user.role == UserRole.SUPER_ADMIN:
         # Superadmin sees clinic-level events
         clinic_actions = [
+            AuditAction.CLINIC_CREATED,
             AuditAction.CLINIC_SUSPENDED,
             AuditAction.CLINIC_UNSUSPENDED,
             AuditAction.CLINIC_ARCHIVED,
