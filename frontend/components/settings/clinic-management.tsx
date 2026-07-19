@@ -416,13 +416,26 @@ export function ClinicManagement() {
     }
   }
 
-  const handleSuspend = async (clinicId: string, isSuspended: boolean) => {
-    if (!isSuspended && !confirm("Suspend this clinic? All users will lose access.")) return
+  const handleSuspend = async (clinicId: string, isCurrentlySuspended: boolean) => {
+    if (!isCurrentlySuspended && !confirm("Suspend this clinic? All users will lose access.")) return
     try {
-      isSuspended ? await afiaAPI.unsuspendClinic(clinicId) : await afiaAPI.suspendClinic(clinicId)
-      toast.success(isSuspended ? "Clinic reactivated" : "Clinic suspended")
-      await loadClinics()
-    } catch { toast.error("Action failed") }
+      const res = isCurrentlySuspended 
+        ? await afiaAPI.unsuspendClinic(clinicId)
+        : await afiaAPI.suspendClinic(clinicId);
+      
+      if (res.error) {
+        throw new Error(res.error);
+      }
+      
+      toast.success(isCurrentlySuspended ? "Clinic reactivated successfully" : "Clinic suspended");
+      
+      // Always refetch fresh data from backend to ensure is_suspended AND is_active are both correct
+      await loadClinics(); 
+      
+    } catch (err: any) {
+      console.error("Suspend/Unsuspend failed:", err);
+      toast.error(err.message || "Failed to update clinic status");
+    }
   }
 
   const handleArchive = async (clinicId: string) => {
