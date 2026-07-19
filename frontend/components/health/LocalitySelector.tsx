@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label"
 // Official 16 regions of Ghana (2024)
 const GHANA_REGIONS = [
   "Ahafo",
-  "Ashanti", 
+  "Ashanti",
   "Bono",
   "Bono East",
   "Central",
@@ -24,6 +24,20 @@ const GHANA_REGIONS = [
   "Western North"
 ] as const;
 
+// Official 10 provinces of Zimbabwe
+const ZIMBABWE_PROVINCES = [
+  "Bulawayo",
+  "Harare",
+  "Manicaland",
+  "Mashonaland Central",
+  "Mashonaland East",
+  "Mashonaland West",
+  "Masvingo",
+  "Matabeleland North",
+  "Matabeleland South",
+  "Midlands"
+] as const;
+
 interface LocalitySelectorProps {
   value: {
     region: string;
@@ -31,25 +45,30 @@ interface LocalitySelectorProps {
   };
   onChange: (value: { region: string; community: string }) => void;
   className?: string;
+  countryCode?: string; // "GH" for Ghana, "ZW" for Zimbabwe
 }
 
-export function LocalitySelector({ value, onChange, className }: LocalitySelectorProps) {
+export function LocalitySelector({ value, onChange, className, countryCode = "GH" }: LocalitySelectorProps) {
+  // Select regions based on country code
+  const regions = countryCode?.toUpperCase() === "ZW" ? ZIMBABWE_PROVINCES : GHANA_REGIONS;
+  const regionLabel = countryCode?.toUpperCase() === "ZW" ? "Province" : "Region";
+
   return (
     <div className={`space-y-4 ${className || ""}`}>
-      {/* Region Selection */}
+      {/* Region/Province Selection */}
       <div className="space-y-2">
         <Label htmlFor="region" className="text-sm font-medium text-slate-700">
-          Region <span className="text-red-500">*</span>
+          {regionLabel} <span className="text-red-500">*</span>
         </Label>
         <Select
           value={value.region}
           onValueChange={(region) => onChange({ ...value, region })}
         >
           <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select region" />
+            <SelectValue placeholder={`Select ${regionLabel.toLowerCase()}`} />
           </SelectTrigger>
           <SelectContent className="max-h-60">
-            {GHANA_REGIONS.map((region) => (
+            {regions.map((region) => (
               <SelectItem key={region} value={region}>
                 {region}
               </SelectItem>
@@ -80,4 +99,4 @@ export function LocalitySelector({ value, onChange, className }: LocalitySelecto
 }
 
 // Export regions for use in other components
-export { GHANA_REGIONS }
+export { GHANA_REGIONS, ZIMBABWE_PROVINCES }

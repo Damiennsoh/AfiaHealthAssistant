@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { AdminAuthModal } from "./admin-auth-modal";
 import { useAuth } from "@/contexts/AfiaAuthContext";
 import { useSync } from "@/contexts/SyncContext";
+import { LocalitySelector } from "./health/LocalitySelector";
 
 interface EditPatientModalProps {
   patient: Patient | null;
@@ -224,33 +225,15 @@ export function EditPatientModal({
             </div>
 
             {/* Region and Community */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="region" className="text-sm font-medium">
-                  Region
-                </Label>
-                <Input
-                  id="region"
-                  value={formData.region}
-                  onChange={(e) => handleInputChange("region", e.target.value)}
-                  placeholder="Region"
-                  className="h-11"
-                  disabled={isSaving}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="community" className="text-sm font-medium">
-                  Community
-                </Label>
-                <Input
-                  id="community"
-                  value={formData.community}
-                  onChange={(e) => handleInputChange("community", e.target.value)}
-                  placeholder="Community"
-                  className="h-11"
-                  disabled={isSaving}
-                />
-              </div>
+            <div className="space-y-2">
+              <LocalitySelector
+                value={{ region: formData.region, community: formData.community }}
+                onChange={(locality) => {
+                  handleInputChange("region", locality.region);
+                  handleInputChange("community", locality.community);
+                }}
+                countryCode={user?.clinic?.country_code || "GH"}
+              />
             </div>
 
             {/* NHIS */}

@@ -11,10 +11,12 @@ import { toast } from "sonner"
 import { patientDB, generateId, generateFolderNumber } from "@/lib/db"
 import { LocalitySelector } from "./LocalitySelector"
 import { useSync } from "@/contexts/SyncContext"
+import { useAuth } from "@/contexts/AuthContext"
 
 export default function NewPatientForm() {
   const router = useRouter()
   const { syncToCloud } = useSync()
+  const { user } = useAuth()
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Form state
@@ -261,6 +263,7 @@ export default function NewPatientForm() {
               <LocalitySelector
                 value={{ region: formData.region, community: formData.community }}
                 onChange={handleLocalityChange}
+                countryCode={user?.clinic?.country_code || "GH"}
               />
             </div>
 
