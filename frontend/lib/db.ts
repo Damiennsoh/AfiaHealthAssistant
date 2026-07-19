@@ -446,7 +446,7 @@ async function getByIndex<T>(
         resolve(processedResults.filter((item: any) => !item.deleted && !item.isDeleted));
       }
     };
-    request.onerror = () => reject(request.error);
+    request.onerror = () => resolve([]); // Return empty array on error instead of rejecting
   });
 }
 
