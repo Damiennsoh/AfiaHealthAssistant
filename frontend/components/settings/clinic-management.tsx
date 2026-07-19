@@ -87,42 +87,50 @@ function AdminPasswordResetPanel({ clinic }: { clinic: Clinic }) {
         <KeyRound className="h-4 w-4 text-amber-500" />
         <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Reset Clinic Admin Password</span>
       </div>
-      <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-        Set a new temporary password for this clinic's administrator. They should change it on next login.
-      </p>
-      <div className="flex items-start gap-2">
-        <div className="flex-1 space-y-1">
-          <div className="relative">
-            <Input
-              type={showPassword ? "text" : "password"}
-              value={newPassword}
-              onChange={(e) => {
-                setNewPassword(e.target.value)
-                setPasswordError(validatePassword(e.target.value))
-              }}
-              placeholder="New admin password"
-              className="pr-10 text-sm"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(v => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+      {clinic.is_suspended || clinic.is_archived ? (
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+          Password reset is not available for {clinic.is_suspended ? "suspended" : "archived"} clinics. Unsuspend or restore the clinic first.
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+            Set a new temporary password for this clinic's administrator. They should change it on next login.
+          </p>
+          <div className="flex items-start gap-2">
+            <div className="flex-1 space-y-1">
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={newPassword}
+                  onChange={(e) => {
+                    setNewPassword(e.target.value)
+                    setPasswordError(validatePassword(e.target.value))
+                  }}
+                  placeholder="New admin password"
+                  className="pr-10 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {passwordError && <p className="text-xs text-red-500">{passwordError}</p>}
+            </div>
+            <Button
+              size="sm"
+              disabled={isResetting || !newPassword}
+              onClick={handleReset}
+              className="bg-amber-500 hover:bg-amber-600 text-white shrink-0"
             >
-              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
+              {isResetting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+              <span className="ml-1.5">Reset</span>
+            </Button>
           </div>
-          {passwordError && <p className="text-xs text-red-500">{passwordError}</p>}
-        </div>
-        <Button
-          size="sm"
-          disabled={isResetting || !newPassword}
-          onClick={handleReset}
-          className="bg-amber-500 hover:bg-amber-600 text-white shrink-0"
-        >
-          {isResetting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-          <span className="ml-1.5">Reset</span>
-        </Button>
-      </div>
+        </>
+      )}
     </div>
   )
 }
@@ -773,6 +781,7 @@ export function ClinicManagement() {
                                 </Button>
                               )}
                               <Button size="sm" variant="outline" onClick={() => handleArchive(clinic.id)}
+                                disabled={clinic.is_suspended || clinic.is_archived}
                                 className="h-8 text-xs gap-1">
                                 <Archive className="h-3.5 w-3.5" /> Archive
                               </Button>
@@ -780,6 +789,7 @@ export function ClinicManagement() {
                                 size="sm"
                                 variant="destructive"
                                 onClick={() => { setDeleteTarget(clinic); setDeleteConfirmText("") }}
+                                disabled={clinic.is_suspended || clinic.is_archived}
                                 className="h-8 w-8 p-0 ml-auto"
                                 title="Permanently delete this clinic"
                               >
