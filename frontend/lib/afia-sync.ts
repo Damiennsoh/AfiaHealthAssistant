@@ -272,27 +272,44 @@ class SyncService {
     this.saveQueue();
 
     try {
-      // Push changes to server
-      const changesToPush = pending.map(c => ({
-        action: c.action,
-        resource_type: c.resourceType,
-        resource_id: c.resourceId,
+      // Push changes to server using correct backend schema
+      const itemsToPush = pending.map(c => ({
+        offline_id: c.resourceId,
+        entity_type: (c.resourceType === 'patient' ? 'patient' : 'encounter') as 'patient' | 'encounter',
+        entity_server_id: null, // Will be assigned by server
         payload: c.payload,
+        payload_version: 1,
+        created_at: new Date(c.timestamp).toISOString(),
       }));
 
-      const response = await afiaAPI.pushSyncChanges(changesToPush, this.queue.deviceId);
+      const response = await afiaAPI.pushSyncChanges({
+        device_id: this.queue.deviceId,
+        items: itemsToPush,
+        last_sync_at: this.queue.lastSync ? new Date(this.queue.lastSync).toISOString() : null,
+      });
 
-      if (response.data) {
-        // Mark all as synced
-        pending.forEach(change => {
-          change.status = 'synced';
-          synced++;
+      if (response.data && Array.isArray(response.data)) {
+        // Process results
+        response.data.forEach((result: any, index: number) => {
+          const change = pending[index];
+          if (result.status === 'acknowledged') {
+            change.status = 'synced';
+            synced++;
+          } else if (result.status === 'conflict_resolved_server_wins') {
+            change.status = 'conflict';
+            conflicts++;
+          } else {
+            change.status = 'failed';
+            change.retryCount++;
+            change.error = result.error || 'Sync failed';
+            failed++;
+          }
         });
 
         this.queue.lastSync = Date.now();
         console.log(`Sync complete: ${synced} changes synced`);
       } else {
-        throw new Error(response.error || 'Sync failed');
+        throw new Error('Invalid response from server');
       }
     } catch (error) {
       console.error('Sync failed:', error);
@@ -323,11 +340,22 @@ class SyncService {
     if (!this.isOnline) return [];
 
     try {
-      const response = await afiaAPI.getPendingSync(this.queue.deviceId);
+      const lastSyncAt = this.queue.lastSync ? new Date(this.queue.lastSync).toISOString() : null;
+      const response = await afiaAPI.pullSyncChanges(this.queue.deviceId, lastSyncAt);
 
-      if (response.data && (response.data as any).changes) {
-        console.log(`Pulled ${(response.data as any).changes.length} changes from server`);
-        return (response.data as any).changes;
+      if (response.data && (response.data as any).items) {
+        console.log(`Pulled ${(response.data as any).items.length} changes from server`);
+        // Convert server items to sync changes format
+        return (response.data as any).items.map((item: any) => ({
+          id: `pull_${item.offline_id}`,
+          action: 'create' as const,
+          resourceType: item.entity_type === 'patient' ? 'patient' : 'encounter',
+          resourceId: item.offline_id,
+          payload: item.payload,
+          timestamp: Date.now(),
+          retryCount: 0,
+          status: 'synced' as const,
+        }));
       }
     } catch (error) {
       console.error('Pull failed:', error);

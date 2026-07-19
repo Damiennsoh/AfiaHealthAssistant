@@ -606,20 +606,28 @@ class AfiaAPI {
   // SYNC (Offline Support)
   // =========================================================================
 
-  async pushSyncChanges(changes: Array<{
-    action: string;
-    resource_type: string;
-    resource_id: string;
-    payload?: Record<string, any>;
-  }>, deviceId: string) {
+  async pushSyncChanges(request: {
+    device_id: string;
+    items: Array<{
+      offline_id: string;
+      entity_type: 'patient' | 'encounter';
+      entity_server_id?: string | null;
+      payload: Record<string, any>;
+      payload_version: number;
+      created_at: string;
+    }>;
+    last_sync_at?: string | null;
+  }) {
     return this.request('/api/v1/sync/push', {
       method: 'POST',
-      body: JSON.stringify({ changes, device_id: deviceId }),
+      body: JSON.stringify(request),
     });
   }
 
-  async getPendingSync(deviceId: string) {
-    return this.request(`/api/v1/sync/pending?device_id=${deviceId}`);
+  async pullSyncChanges(deviceId: string, lastSyncAt?: string | null) {
+    const params = new URLSearchParams({ device_id: deviceId });
+    if (lastSyncAt) params.append('last_sync_at', lastSyncAt);
+    return this.request(`/api/v1/sync/pull?${params.toString()}`);
   }
 
   async acknowledgeSync(syncId: string, success = true, error?: string) {

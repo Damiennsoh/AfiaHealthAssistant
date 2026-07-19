@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.api.deps import require_healthworker, get_current_active_user
+from app.api.deps import get_current_active_user
 from app.models.user import User
 from app.schemas.sync import SyncPushRequest, SyncPullResponse, SyncResult, SyncAckRequest
 from app.services.sync_service import SyncService
@@ -19,7 +19,7 @@ router = APIRouter()
 @router.post("/push", response_model=List[SyncResult])
 async def push_changes(
     request: SyncPushRequest,
-    current_user: User = Depends(require_healthworker),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Push offline changes to server."""
@@ -31,7 +31,7 @@ async def push_changes(
 async def pull_changes(
     device_id: str,
     last_sync_at: str = None,
-    current_user: User = Depends(require_healthworker),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Pull changes from server."""
@@ -48,7 +48,7 @@ async def pull_changes(
 @router.post("/ack")
 async def acknowledge_sync(
     request: SyncAckRequest,
-    current_user: User = Depends(require_healthworker),
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Acknowledge received sync items."""
