@@ -361,15 +361,21 @@ export function ClinicManagement() {
         const response = await afiaAPI.listClinics()
         if (response.data && Array.isArray(response.data)) {
           setClinics(response.data as Clinic[])
+        } else {
+          setClinics([]) // Handle empty/null response safely
         }
       } else if (isClinicAdmin && user?.clinic_id) {
         const response = await afiaAPI.getClinic(user.clinic_id)
         if (response.data) {
           setClinics([response.data as unknown as Clinic])
+        } else {
+          setClinics([])
         }
       }
-    } catch {
-      setError("Failed to load clinic information")
+    } catch (err: any) {
+      console.error("Failed to load clinics:", err)
+      setError(err.message || "Failed to load clinic information")
+      setClinics([]) // Prevent rendering with undefined state
     } finally {
       setIsLoading(false)
     }
@@ -795,7 +801,7 @@ export function ClinicManagement() {
                               )}
                               <Button size="sm" variant="outline" onClick={() => handleArchive(clinic.id)}
                                 disabled={clinic.is_suspended || clinic.is_archived}
-                                className="h-8 text-xs gap-1">
+                                className={`h-8 text-xs gap-1 ${clinic.is_suspended ? 'opacity-40 cursor-not-allowed' : ''}`}>
                                 <Archive className="h-3.5 w-3.5" /> Archive
                               </Button>
                               <Button
@@ -803,8 +809,8 @@ export function ClinicManagement() {
                                 variant="destructive"
                                 onClick={() => { setDeleteTarget(clinic); setDeleteConfirmText("") }}
                                 disabled={clinic.is_suspended || clinic.is_archived}
-                                className="h-8 w-8 p-0 ml-auto"
-                                title="Permanently delete this clinic"
+                                className={`h-8 w-8 p-0 ml-auto ${clinic.is_suspended ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                title={clinic.is_suspended ? "Unsuspend clinic first to delete" : "Permanently delete this clinic"}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
