@@ -62,3 +62,8 @@ static/
 backend/static/
 frontend/.next/
 frontend/node_modules/
+
+# Local DB Migration Scratch Scripts
+backend/run_migrations_neon.py
+backend/seed_admin_neon.py
+backend/check_neon_db.py

@@ -1,626 +1,137 @@
-The reason clinics remain visible despite "successful" messages, and why audit logs are not recording, is a combination of **three specific issues** in your code:
+You are absolutely right to be cautious. The previous code I provided was a simplified rewrite that stripped out your existing components (`AdminPasswordResetPanel`, `ClinicSettingsPanel`, etc.) and the Accordion structure, which is why it was only ~400 lines instead of your original 800+.
 
-1.  **CORS Blocking All Requests:** Your console shows `Access-Control-Allow-Origin` errors. The browser is blocking the API calls *before* they reach your backend. The frontend receives a network error but your `handleSuspend/archive/delete` functions catch it silently or show a misleading success toast because the response parsing fails.
-2.  **Missing `is_archived` Column & Logic:** Your `clinic.py` model defines `archived_at` and `archived_by` but **does not define `is_archived`**. Even if the API call succeeded, setting timestamps without the boolean flag means your list query (which likely filters by `is_archived == False`) cannot hide them.
-3.  **Audit Service Not Called in Routes:** Your `AuditService` exists, but your current clinic route handlers (not shown in provided files but inferred from behavior) are not invoking `audit_service.log()`. Without explicit calls, no entries are created.
+**Do not replace your entire file.** Instead, apply these **three targeted surgical fixes** directly into your existing 800-line `clinic-management.tsx`. This preserves all your existing logic while fixing the suspend/unsuspend button issue.
 
-Here are the exact fixes to apply immediately:
-
-### 1. Fix CORS First (Blocks Everything)
-Your Render backend must explicitly allow your Vercel origin. Update your `main.py`:
-
-```python
-# In app/main.py
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://afiahealthassistant-1j.vercel.app"  # MUST match exactly
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
-> ⚠️ **Redeploy to Render after this change.** CORS requires a server restart.
-
-### 2. Add Missing `is_archived` Column to Model
-Your SQL migration added the column, but SQLAlchemy doesn't know about it. Update `clinic.py`:
-
-```python
-# In app/models/clinic.py - ADD THIS COLUMN
-is_archived = Column(Boolean, default=False, nullable=False, server_default="false")
-
-# FIX THE ARCHIVE METHOD TO ACTUALLY SET THE FLAG
-def archive(self, user_id: uuid.UUID) -> None:
-    """Archive clinic: hide from UI, preserve data for compliance."""
-    self.is_archived = True  # ← CRITICAL: Was missing!
-    self.archived_at = datetime.now(timezone.utc)
-    self.archived_by = user_id
-    self.is_active = False
-```
-
-### 3. Update Backend List Query to Filter Archived Clinics
-Your `/clinics/` endpoint must exclude archived clinics. Update the route handler:
-
-```python
-# In your clinic list endpoint
-query = select(Clinic).where(
-    Clinic.is_deleted == False,
-    Clinic.is_archived == False  # ← ADD THIS FILTER
-)
-```
-
-### 4. Add Audit Logging to All Clinic Actions
-Your routes must explicitly call `AuditService`. Example for suspend/archive/delete:
-
-```python
-# In clinic routes
-@router.post("/{clinic_id}/suspend")
-async def suspend_clinic(...):
-    clinic = await get_clinic_or_404(db, clinic_id)
-    audit_service = AuditService(db)
-    await audit_service.log(
-        action=AuditAction.CLINIC_SUSPENDED,
-        user=current_user,
-        clinic=clinic,
-        details={"suspended_by": str(current_user.id)}
-    )
-    clinic.suspend(current_user.id)
-    await db.commit()
-    return {"message": "Clinic suspended"}
-
-# Repeat same pattern for archive and delete endpoints
-```
-
-### 5. Update Frontend Badge Logic
-Your current badge only checks `is_suspended` and `is_active`. Add `is_archived`:
+###  Fix 1: Update `loadClinics` (Lines ~356-376)
+Your current `loadClinics` has a bug where clinic admins might get stale data. Replace it with this robust version:
 
 ```tsx
-// In clinic-management.tsx Badge component
-<Badge className={
-  clinic.is_suspended ? "bg-yellow-500 text-white" :
-  clinic.is_archived ? "bg-gray-500 text-white" :  // ← ADD THIS
-  clinic.is_active ? "bg-emerald-600 text-white" : 
-  "bg-slate-400 text-white"
-}>
-  {clinic.is_suspended ? "Suspended" : 
-   clinic.is_archived ? "Archived" : 
-   clinic.is_active ? "Active" : "Inactive"}
-</Badge>
-```
-
-### Why Success Toasts Appear Despite Failures
-Your `handleArchive`/`handleDelete` functions use `try/catch` but don't validate the response properly. When CORS blocks the request, `fetch` throws a network error that gets caught, but your code may still show a success toast if the error handling is incomplete. After fixing CORS, verify responses in DevTools Network tab – you should see `200 OK` with proper JSON, not `ERR_FAILED`.
-
-### Critical Next Steps
-1.  Apply CORS fix → Redeploy to Render
-2.  Add `is_archived` column to model + fix `archive()` method
-3.  Update list query filter + add audit logging to routes
-4.  Restart Render backend (model changes require restart)
-5.  Test: Archive a clinic → Verify it disappears from list AND appears in audit logs
-
-Would you like me to provide the complete updated backend route handlers file with integrated audit logging next?
-
-
-Based on the files you provided, I have identified the exact root causes for your issues:
-
-1.  **Clinics Still Visible:** Your `clinic.py` model's `archive()` method sets timestamps but **never sets `is_archived = True`**. Since the column doesn't exist in the model definition, SQLAlchemy ignores it during commits. Additionally, your backend list query likely lacks a filter for `is_archived == False`.
-2.  **No Audit Logs:** Your `AuditService` exists and has the correct actions defined (`CLINIC_SUSPENDED`, etc.), but **your current route handlers are not calling `audit_service.log()`**. The service is idle because no endpoint invokes it.
-3.  **CORS Blocking Requests:** Your console logs show `Access-Control-Allow-Origin` errors. The browser blocks API calls before they reach your Python code, causing silent failures or misleading success toasts.
-
-Here are the complete fixes. Apply these in order:
-
-### 1. Fix CORS First (Critical Blocker)
-Your Render backend must explicitly allow your Vercel origin. Update your `main.py`:
-
-```python
-# In app/main.py
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://afiahealthassistant-1j.vercel.app"  # MUST match exactly
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
-> ⚠️ **Redeploy to Render after this change.** CORS requires a server restart.
-
-### 2. Update `app/models/clinic.py`
-Add the missing `is_archived` column and fix the `archive()` method to actually set it:
-
-```python
-# In app/models/clinic.py - inside the Clinic class
-
-# ✅ ADD THIS COLUMN (matches your SQL migration)
-is_archived = Column(Boolean, default=False, nullable=False, server_default="false")
-
-# ✅ FIX THE ARCHIVE METHOD
-def archive(self, user_id: uuid.UUID) -> None:
-    """Archive clinic: hide from UI, preserve data for compliance."""
-    self.is_archived = True  # ← CRITICAL FIX: Was missing!
-    self.archived_at = datetime.now(timezone.utc)
-    self.archived_by = user_id
-    self.is_active = False
-    # Note: We do NOT touch is_deleted here. Archiving ≠ Deletion.
-```
-
-### 3. Create Updated Backend Routes with Audit Logging
-Replace your existing clinic management endpoints with this version that integrates `AuditService` and filters archived clinics:
-
-```python
-# In app/api/v1/endpoints/clinics.py
-from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from typing import List
-
-from app.db.session import get_db
-from app.models.user import User
-from app.models.clinic import Clinic
-from app.models.patient import Patient  # For delete safety check
-from app.services.audit_service import AuditService
-from app.models.audit import AuditAction
-from app.core.security import get_current_super_admin, get_clinic_or_404
-
-router = APIRouter(prefix="/clinics", tags=["Clinics"])
-
-@router.get("/", response_model=List[dict])
-async def list_clinics(
-    current_user: User = Depends(get_current_super_admin),
-    db: AsyncSession = Depends(get_db)
-):
-    """✅ FIXED: Excludes both soft-deleted AND archived clinics"""
-    query = select(Clinic).where(
-        Clinic.is_deleted == False,
-        Clinic.is_archived == False  # ← NEW FILTER
-    )
-    result = await db.execute(query)
-    clinics = result.scalars().all()
-    
-    return [
-        {
-            "id": str(c.id), "name": c.name, "code": c.code,
-            "country_code": c.country_code, "region": c.region,
-            "district": c.district, "address": c.address,
-            "phone": c.phone, "email": c.email,
-            "is_active": c.is_active, "is_suspended": c.is_suspended,
-            "is_demo_clinic": c.is_demo_clinic,
-            "require_staff_id": c.require_staff_id,
-            "require_department": c.require_department,
-            "features": c.features or {},
-            "tier": c.tier.value if c.tier else None,
-            "status": c.status.value if c.status else None,
-            "created_at": c.created_at.isoformat() if c.created_at else None,
-            "user_count": len(c.users) if hasattr(c, 'users') else 0,
-            "patient_count": len(c.patients) if hasattr(c, 'patients') else 0,
-        }
-        for c in clinics
-    ]
-
-@router.post("/{clinic_id}/suspend")
-async def suspend_clinic(
-    clinic_id: UUID,
-    current_user: User = Depends(get_current_super_admin),
-    db: AsyncSession = Depends(get_db)
-):
-    clinic = await get_clinic_or_404(db, clinic_id)
-    
-    # ✅ AUDIT LOG BEFORE STATE CHANGE
-    audit_service = AuditService(db)
-    await audit_service.log(
-        action=AuditAction.CLINIC_SUSPENDED,
-        user=current_user,
-        clinic=clinic,
-        details={"suspended_by": str(current_user.id)}
-    )
-    
-    clinic.suspend(current_user.id)
-    await db.commit()
-    return {"message": "Clinic suspended"}
-
-@router.post("/{clinic_id}/unsuspend")
-async def unsuspend_clinic(
-    clinic_id: UUID,
-    current_user: User = Depends(get_current_super_admin),
-    db: AsyncSession = Depends(get_db)
-):
-    clinic = await get_clinic_or_404(db, clinic_id)
-    
-    audit_service = AuditService(db)
-    await audit_service.log(
-        action=AuditAction.CLINIC_UNSUSPENDED,
-        user=current_user,
-        clinic=clinic,
-        details={"unsuspended_by": str(current_user.id)}
-    )
-    
-    clinic.unsuspend()
-    await db.commit()
-    return {"message": "Clinic reactivated"}
-
-@router.post("/{clinic_id}/archive")
-async def archive_clinic(
-    clinic_id: UUID,
-    current_user: User = Depends(get_current_super_admin),
-    db: AsyncSession = Depends(get_db)
-):
-    clinic = await get_clinic_or_404(db, clinic_id)
-    
-    if clinic.code == "ADMIN-001":
-        raise HTTPException(status_code=403, detail="Cannot archive admin clinic")
-    
-    audit_service = AuditService(db)
-    await audit_service.log(
-        action=AuditAction.CLINIC_ARCHIVED,
-        user=current_user,
-        clinic=clinic,
-        details={"archived_by": str(current_user.id)}
-    )
-    
-    clinic.archive(current_user.id)  # Now correctly sets is_archived=True
-    await db.commit()
-    return {"message": "Clinic archived"}
-
-@router.delete("/{clinic_id}")
-async def delete_clinic(
-    clinic_id: UUID,
-    current_user: User = Depends(get_current_super_admin),
-    db: AsyncSession = Depends(get_db)
-):
-    clinic = await get_clinic_or_404(db, clinic_id)
-    
-    # ✅ SAFETY CHECK: Block deletion if patients exist
-    patient_count_query = select(func.count()).select_from(Patient).where(
-        Patient.clinic_id == clinic_id
-    )
-    patient_count_result = await db.execute(patient_count_query)
-    patient_count = patient_count_result.scalar()
-    
-    if patient_count > 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot delete clinic with {patient_count} patient record(s). Archive instead."
-        )
-    
-    audit_service = AuditService(db)
-    await audit_service.log(
-        action=AuditAction.CLINIC_DELETED,
-        user=current_user,
-        clinic=clinic,
-        details={"deleted_by": str(current_user.id), "was_demo": clinic.is_demo_clinic}
-    )
-    
-    clinic.soft_delete()
-    await db.commit()
-    return {"message": "Clinic permanently deleted"}
-```
-
-### 4. Update Frontend Badge Logic
-Your current badge only checks `is_suspended` and `is_active`. Add `is_archived` support in `clinic-management.tsx`:
-
-```tsx
-// In the Badge component within clinic-management.tsx
-<Badge
-  className={
-    clinic.is_suspended
-      ? "bg-yellow-500 text-white"
-      : clinic.is_archived  // ✅ ADD THIS CHECK
-        ? "bg-gray-500 text-white"
-        : clinic.is_active
-          ? "bg-emerald-600 text-white"
-          : "bg-slate-400 text-white"
+// REPLACE your existing loadClinics function with this:
+const loadClinics = useCallback(async () => {
+  setIsLoading(true)
+  setError(null)
+  try {
+    if (isSuperAdmin) {
+      const response = await afiaAPI.listClinics()
+      if (response.data && Array.isArray(response.data)) {
+        setClinics(response.data as Clinic[])
+      } else {
+        setClinics([]) // Handle empty/null response safely
+      }
+    } else if (isClinicAdmin && user?.clinic_id) {
+      const response = await afiaAPI.getClinic(user.clinic_id)
+      if (response.data) {
+        setClinics([response.data as unknown as Clinic])
+      } else {
+        setClinics([])
+      }
+    }
+  } catch (err: any) {
+    console.error("Failed to load clinics:", err)
+    setError(err.message || "Failed to load clinic information")
+    setClinics([]) // Prevent rendering with undefined state
+  } finally {
+    setIsLoading(false)
   }
->
-  {clinic.is_suspended 
-    ? "Suspended" 
-    : clinic.is_archived 
-      ? "Archived" 
-      : clinic.is_active 
-        ? "Active" 
-        : "Inactive"}
-</Badge>
+}, [isSuperAdmin, isClinicAdmin, user?.clinic_id])
 ```
 
-### Critical Next Steps After Applying Fixes
+### 🔧 Fix 2: Update `handleSuspend` (Lines ~419-439)
+This is the critical fix. Your current version manually mutates state. Replace it with this version that **always refetches fresh data**:
 
-1.  **Fix CORS First** → Redeploy to Render immediately
-2.  **Add `is_archived` column** to `Clinic` model + update `archive()` method
-3.  **Add audit logging** to all clinic action endpoints (suspend/unsuspend/archive/delete)
-4.  **Update backend list query** to filter `is_archived == False`
-5.  **Update frontend badge** to show "Archived" state
-6.  **Restart Render backend** after all changes (model updates require restart)
-7.  **Test**: Archive a clinic → Verify it disappears from list AND appears in audit logs
-
-Would you like me to also provide the updated frontend `afia-api.ts` client methods to ensure they match these backend endpoints exactly?
-
-
-
-
-
-You are absolutely right to be frustrated. Looking at your screenshot, **your CORS configuration on Render is actually correct.** The value `https://afiahealthassistant-1j.vercel.app,http://localhost:3000` is exactly what it should be.
-
-So why is it still failing?
-
-###  The Real Problem: It's NOT CORS Anymore
-
-Look closely at your console errors again:
-
-```
-Access to fetch at '.../api/v1/clinics/7d22b0a9...' 
-from origin 'https://afiahealthassistant-1j.vercel.app' 
-has been blocked by CORS policy: 
-No 'Access-Control-Allow-Origin' header is present
-```
-
-This error message is **misleading**. When a backend server crashes, returns a 500 error, or has a misconfigured middleware that strips headers, the browser often reports it as a "CORS" error even though the real issue is that **the server never successfully responded**.
-
-Given that you've confirmed CORS is set correctly, here are the **actual root causes** based on your code files:
-
----
-
-### 🚨 Root Cause 1: Missing `is_archived` Column in Model (CRITICAL)
-
-Your `clinic.py` model defines `archived_at` and `archived_by` but **does NOT define `is_archived`**:
-
-```python
-# In clinic.py - THIS COLUMN IS MISSING!
-# archived_at = Column(...)  ← EXISTS
-# archived_by = Column(...)  ← EXISTS
-# is_archived = Column(...)  ← DOES NOT EXIST!
+```tsx
+// REPLACE your existing handleSuspend function with this:
+const handleSuspend = async (clinicId: string, isCurrentlySuspended: boolean) => {
+  if (!isCurrentlySuspended && !confirm("Suspend this clinic? All users will lose access.")) return
+  
+  try {
+    const res = isCurrentlySuspended 
+      ? await afiaAPI.unsuspendClinic(clinicId)
+      : await afiaAPI.suspendClinic(clinicId);
+    
+    if (res.error) {
+      throw new Error(res.error);
+    }
+    
+    toast.success(isCurrentlySuspended ? "Clinic reactivated successfully" : "Clinic suspended");
+    
+    // ✅ CRITICAL FIX: Always refetch fresh data from backend
+    // This ensures is_suspended AND is_active are both correct
+    await loadClinics(); 
+    
+  } catch (err: any) {
+    console.error("Suspend/Unsuspend failed:", err);
+    toast.error(err.message || "Failed to update clinic status");
+  }
+}
 ```
 
-When your backend tries to query `Clinic.is_archived == False` (which we discussed adding), **SQLAlchemy throws an AttributeError** because the column doesn't exist in the Python model. This causes the entire `/clinics/` endpoint to crash with a 500 error, which the browser misreports as CORS.
+### 🔧 Fix 3: Update Actions Section in JSX (Lines ~758-790)
+Find the `<div className="flex flex-wrap items-center gap-2 border-t...">` inside your `AccordionContent` and replace the buttons with this version that disables actions when suspended:
 
-**Fix:** Add this line to your `Clinic` class in `clinic.py`:
+```tsx
+{/* REPLACE the existing Actions div with this */}
+<div className="flex flex-wrap items-center gap-2 border-t border-slate-200 dark:border-slate-700 pt-3">
+  <span className="text-xs text-slate-400 mr-1">Actions:</span>
+  
+  {/* Suspend/Unsuspend Toggle */}
+  {clinic.is_suspended ? (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={() => handleSuspend(clinic.id, true)}
+      className="h-8 text-xs gap-1 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:text-emerald-800"
+    >
+      <CheckCircle className="h-3.5 w-3.5" /> Unsuspend
+    </Button>
+  ) : (
+    <Button size="sm" variant="outline" onClick={() => handleSuspend(clinic.id, false)}
+      className="h-8 text-xs gap-1 text-yellow-600 border-yellow-300 hover:bg-yellow-50">
+      <Ban className="h-3.5 w-3.5" /> Suspend
+    </Button>
+  )}
 
-```python
-is_archived = Column(Boolean, default=False, nullable=False, server_default="false")
+  {/* Archive Button - Disabled when suspended */}
+  <Button size="sm" variant="outline" onClick={() => handleArchive(clinic.id)}
+    disabled={clinic.is_suspended || clinic.is_archived}
+    className={`h-8 text-xs gap-1 ${clinic.is_suspended ? 'opacity-40 cursor-not-allowed' : ''}`}>
+    <Archive className="h-3.5 w-3.5" /> Archive
+  </Button>
+
+  {/* Delete Button - Disabled when suspended */}
+  <Button
+    size="sm"
+    variant="destructive"
+    onClick={() => { setDeleteTarget(clinic); setDeleteConfirmText("") }}
+    disabled={clinic.is_suspended || clinic.is_archived}
+    className={`h-8 w-8 p-0 ml-auto ${clinic.is_suspended ? 'opacity-40 cursor-not-allowed' : ''}`}
+    title={clinic.is_suspended ? "Unsuspend clinic first to delete" : "Permanently delete this clinic"}
+  >
+    <Trash2 className="h-3.5 w-3.5" />
+  </Button>
+</div>
 ```
 
-And fix the `archive()` method to actually set it:
+### 🔧 Fix 4: Update Password Reset Panel (Inside `AdminPasswordResetPanel`)
+In your `AdminPasswordResetPanel` component, add the disabled state for suspended clinics:
 
-```python
-def archive(self, user_id: uuid.UUID) -> None:
-    self.is_archived = True  # ← THIS LINE IS MISSING!
-    self.archived_at = datetime.now(timezone.utc)
-    self.archived_by = user_id
-    self.is_active = False
+```tsx
+// In AdminPasswordResetPanel, wrap the input/button section with this condition:
+{clinic.is_suspended || clinic.is_archived ? (
+  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+    Password reset is not available for {clinic.is_suspended ? "suspended" : "archived"} clinics. Unsuspend or restore the clinic first.
+  </p>
+) : (
+  <>
+    {/* ... existing password reset form code ... */}
+  </>
+)}
 ```
 
----
+### ✅ Why These Targeted Fixes Are Better
+1.  **Preserves Your Architecture:** Keeps your `Accordion`, `ClinicSettingsPanel`, `ClinicAdminEditPanel`, and validation logic intact.
+2.  **Fixes Root Cause:** The `handleSuspend` now awaits `loadClinics()`, ensuring the UI reflects the true database state.
+3.  **Safety First:** Disables destructive actions (archive/delete/password reset) when a clinic is suspended.
+4.  **Minimal Risk:** Only changes ~50 lines of code instead of rewriting 800 lines.
 
-### 🚨 Root Cause 2: Audit Service Not Called in Routes
-
-Your `audit_service.py` is perfectly written, but **no route handler calls it**. Your current backend routes (which aren't shown in your uploaded files but are implied by the behavior) likely look like this:
-
-```python
-@router.post("/{clinic_id}/suspend")
-async def suspend_clinic(...):
-    clinic = await get_clinic_or_404(db, clinic_id)
-    clinic.suspend(current_user.id)
-    await db.commit()
-    return {"message": "Suspended"}
-    # ← NO AUDIT LOGGING HERE!
-```
-
-**Fix:** Every clinic action endpoint must call `AuditService.log()`. See the complete route handlers I provided earlier.
-
----
-
-### 🚨 Root Cause 3: Backend List Query Doesn't Filter Archived Clinics
-
-Even if the API call succeeds, archived clinics remain visible because your `list_clinics` endpoint likely only filters `is_deleted`:
-
-```python
-# Current (broken) query:
-query = select(Clinic).where(Clinic.is_deleted == False)
-
-# Fixed query:
-query = select(Clinic).where(
-    Clinic.is_deleted == False,
-    Clinic.is_archived == False  # ← ADD THIS
-)
-```
-
----
-
-### 🛠️ Immediate Action Plan
-
-1.  **Add `is_archived` column** to `clinic.py` model + fix `archive()` method
-2.  **Add audit logging** to all clinic action endpoints (suspend/unsuspend/archive/delete)
-3.  **Update list query** to filter `is_archived == False`
-4.  **Redeploy to Render** (model changes require restart)
-5.  **Test in DevTools Network tab**: Look for actual HTTP status codes (500, 404) instead of assuming CORS
-
-The CORS error is a **symptom**, not the cause. Fix the three issues above, and the "CORS" errors will disappear because the server will start responding successfully.
-
-Would you like me to provide the complete corrected `clinic.py` file with all fixes integrated?
-
-
-Here is the complete, corrected `clinic.py` file. This version fixes the **missing `is_archived` column**, corrects the **broken `archive()` method**, and ensures all state-change logic aligns with your SQL migration and compliance requirements.
-
-### ✅ Corrected `app/models/clinic.py`
-
-```python
-"""
-AFIA Health Assistant — Clinic Model (Multi-tenant SaaS)
-Each clinic subscribes to the service. Data is isolated by clinic_id.
-"""
-import uuid
-from datetime import datetime, timezone
-from enum import Enum as PyEnum
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Enum, Integer
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
-from app.models.base import BaseModel, SoftDeleteMixin
-
-
-class SubscriptionTier(str, PyEnum):
-    """Subscription tiers for clinics."""
-    BASIC = "basic"           # SaaS only, urban clinics
-    PRO = "pro"               # SaaS + offline PWA, rural clinics
-    ENTERPRISE = "enterprise"  # Self-hosted option for hospital groups
-
-
-class SubscriptionStatus(str, PyEnum):
-    """Subscription status."""
-    ACTIVE = "active"
-    TRIAL = "trial"
-    EXPIRED = "expired"
-    SUSPENDED = "suspended"
-
-
-class Clinic(BaseModel, SoftDeleteMixin):
-    """Clinic/Health facility — the tenant unit."""
-    __tablename__ = "clinics"
-
-    # Identity
-    name = Column(String(255), nullable=False)
-    code = Column(String(50), unique=True, nullable=False, index=True)  # e.g., "ACCRA-001"
-    
-    # Country context (determines knowledge base)
-    country_code = Column(String(2), nullable=False, index=True)  # "GH" or "ZW"
-    region = Column(String(100), nullable=True)  # Region/province
-    district = Column(String(100), nullable=True)  # District
-    
-    # Contact
-    address = Column(Text, nullable=True)
-    phone = Column(String(50), nullable=True)
-    email = Column(String(255), nullable=True)
-    
-    # Subscription (SaaS billing)
-    tier = Column(Enum(SubscriptionTier), default=SubscriptionTier.BASIC)
-    status = Column(Enum(SubscriptionStatus), default=SubscriptionStatus.TRIAL)
-    stripe_customer_id = Column(String(255), nullable=True)
-    stripe_subscription_id = Column(String(255), nullable=True)
-    trial_ends_at = Column(DateTime(timezone=True), nullable=True)
-    subscription_renews_at = Column(DateTime(timezone=True), nullable=True)
-    
-    # Usage limits
-    max_users = Column(Integer, default=5)  # Staff accounts
-    max_patients = Column(Integer, default=10000)
-    max_storage_mb = Column(Integer, default=1024)  # MinIO storage
-    
-    # Offline PWA config (for PRO tier)
-    offline_enabled = Column(Boolean, default=False)
-    offline_device_limit = Column(Integer, default=3)  # Max devices for offline sync
-    last_offline_sync = Column(DateTime(timezone=True), nullable=True)
-    
-    # Features
-    features = Column(JSONB, default=dict)  # {"analytics": true, "custom_reports": false}
-    
-    # Validation requirements for login
-    require_staff_id = Column(Boolean, default=False)
-    require_department = Column(Boolean, default=False)
-    
-    # Admin
-    admin_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    is_active = Column(Boolean, default=True)
-    
-    # Suspension & Archival (for subscription management)
-    is_suspended = Column(Boolean, default=False)
-    suspended_at = Column(DateTime(timezone=True), nullable=True)
-    suspended_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    
-    # ✅ FIXED: Added missing is_archived column to match DB migration
-    is_archived = Column(Boolean, default=False, nullable=False, server_default="false")
-    archived_at = Column(DateTime(timezone=True), nullable=True)
-    archived_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    
-    is_demo_clinic = Column(Boolean, default=False)
-    
-    # Soft delete — row is hidden but never destroyed (preserves audit trails and FK integrity)
-    # NOTE: The `is_deleted` column is inherited from SoftDeleteMixin
-
-    # Relationships
-    users = relationship("User", foreign_keys="User.clinic_id", back_populates="clinic", cascade="all, delete-orphan")
-    patients = relationship("Patient", back_populates="clinic", cascade="all, delete-orphan")
-    encounters = relationship("Encounter", back_populates="clinic")
-    audit_logs = relationship("AuditLog", back_populates="clinic")
-
-    def get_knowledge_base(self) -> str:
-        """Return the knowledge base identifier for this clinic's country."""
-        country_kb = {
-            "GH": "ghana_stg_2025",
-            "ZW": "edliz_2020",
-        }
-        return country_kb.get(self.country_code.upper(), "ghana_stg_2025")
-
-    def is_trial_active(self) -> bool:
-        """Check if trial period is still active."""
-        if self.status == SubscriptionStatus.TRIAL and self.trial_ends_at:
-            return self.trial_ends_at > datetime.now(timezone.utc)
-        return False
-
-    def can_use_offline(self) -> bool:
-        """Check if clinic has offline PWA enabled."""
-        return self.tier in [SubscriptionTier.PRO, SubscriptionTier.ENTERPRISE] and self.offline_enabled
-
-    def suspend(self, user_id: uuid.UUID) -> None:
-        """Suspend clinic (reversible). Blocks access due to non-payment/admin hold."""
-        self.is_suspended = True
-        self.suspended_at = datetime.now(timezone.utc)
-        self.suspended_by = user_id
-        self.is_active = False
-
-    def unsuspend(self) -> None:
-        """Unsuspend clinic (reactivate). Restores access upon payment/resolution."""
-        self.is_suspended = False
-        self.suspended_at = None
-        self.suspended_by = None
-        self.is_active = True
-
-    def archive(self, user_id: uuid.UUID) -> None:
-        """Archive clinic (end-of-life). Hides from UI, preserves data for compliance."""
-        # ✅ FIXED: Now sets is_archived = True so frontend/backend filters work
-        self.is_archived = True
-        self.archived_at = datetime.now(timezone.utc)
-        self.archived_by = user_id
-        self.is_active = False
-        # Note: We do NOT touch is_deleted here. Archiving ≠ Deletion.
-
-    def soft_delete(self) -> None:
-        """
-        Full soft-delete: hides the clinic from ALL queries and UI.
-        Row is never destroyed — preserves audit logs and FK integrity.
-        """
-        self.is_deleted = True
-        self.is_active = False
-```
-
----
-
-### 🔑 Key Fixes Applied
-
-| Issue | Previous Code | Fixed Code | Why It Matters |
-| :--- | :--- | :--- | :--- |
-| **Missing Column** | No `is_archived` field defined | Added `is_archived = Column(Boolean, ...)` | SQLAlchemy now recognizes the column you added via SQL migration |
-| **Broken Archive Logic** | `archive()` didn't set `is_archived` | `self.is_archived = True` | Backend queries filtering `is_archived == False` will now correctly hide archived clinics |
-| **State Confusion** | Archive and Delete were functionally similar | Archive sets `is_archived`; Delete sets `is_deleted` | Clear separation: Archived = closed but retrievable; Deleted = hidden permanently |
-| **Compliance Gap** | No explicit archival timestamp tracking | `archived_at` and `archived_by` properly set | Audit trail shows exactly when and who archived a clinic |
-
----
-
-### ⚠️ Critical Next Steps After Applying This File
-
-1.  **Restart Your Render Backend:** Python models are loaded at startup. The new `is_archived` column won't be recognized until the server restarts.
-2.  **Update Your List Clinics Query:** Ensure your backend endpoint filters out archived clinics:
-    ```python
-    query = select(Clinic).where(
-        Clinic.is_deleted == False,
-        Clinic.is_archived == False  # ← Add this line
-    )
-    ```
-3.  **Verify CORS Fix First:** Before testing archive/delete functionality, confirm your CORS middleware includes `https://afiahealthassistant-1j.vercel.app`. Without this, no API calls will reach your backend regardless of model fixes.
-4.  **Add Audit Logging to Routes:** As previously discussed, your route handlers must call `AuditService.log()` for every action. The model changes alone won't create audit entries.
-
-Would you like me to generate the updated backend route handlers with integrated audit logging next?
+Apply these four fixes to your existing file, redeploy, and the "Unsuspend" button will appear immediately after suspending Zonno CHPS.
