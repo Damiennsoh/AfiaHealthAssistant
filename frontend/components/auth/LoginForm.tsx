@@ -61,11 +61,10 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
   useEffect(() => {
     const loadClinics = async () => {
       setIsLoadingClinics(true)
-      setError(null)
       try {
         const response = await afiaAPI.listPublicClinics(country)
         if (response.error) {
-          setError(response.error)
+          console.warn('[LoginForm] Clinic list discovery notice:', response.error)
           setClinics([])
         } else {
           // Safely extract array from response
@@ -80,7 +79,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
           }
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load clinics')
+        console.warn('[LoginForm] Clinic list discovery error:', err)
         setClinics([]) // Force reset to empty array on failure
       } finally {
         setIsLoadingClinics(false)
@@ -95,11 +94,10 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
     if (searchQuery) {
       const loadClinics = async () => {
         setIsLoadingClinics(true)
-        setError(null)
         try {
           const response = await afiaAPI.listPublicClinics(country, searchQuery)
           if (response.error) {
-            setError(response.error)
+            console.warn('[LoginForm] Search clinic notice:', response.error)
             setClinics([])
           } else {
             // Safely extract array from response
@@ -109,7 +107,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
             setClinics(clinicsArray)
           }
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Failed to load clinics')
+          console.warn('[LoginForm] Search clinic error:', err)
           setClinics([]) // Force reset to empty array on failure
         } finally {
           setIsLoadingClinics(false)
@@ -414,8 +412,35 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
                     <span className="ml-2 text-slate-600">Loading clinics...</span>
                   </div>
                 ) : (clinics || []).length === 0 ? (
-                  <div className="text-center p-4 text-slate-500">
-                    No clinics found
+                  <div className="text-center py-6 px-4 bg-slate-50/70 rounded-lg border border-dashed border-slate-200 space-y-3">
+                    <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400">
+                      <Building className="h-5 w-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-700">
+                        {searchQuery ? "No matching clinics found" : "No registered clinics found (0 clinics)"}
+                      </p>
+                      <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+                        {searchQuery
+                          ? "Try a different search term or clear the search field."
+                          : "Super Admins can log in below to register partnered clinics and provision staff credentials."}
+                      </p>
+                    </div>
+                    {!searchQuery && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setIsSuperAdmin(true)
+                          setStep(2)
+                        }}
+                        className="text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 gap-1.5 font-medium shadow-xs"
+                      >
+                        <Shield className="h-3.5 w-3.5" />
+                        Log in as Super Admin to Provision Clinics
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   (clinics || []).map((clinic) => (
