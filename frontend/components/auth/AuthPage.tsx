@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
-import { ShieldCheck, Stethoscope, Activity, Lock, Database, WifiOff } from "lucide-react"
+import { ShieldCheck, Stethoscope, Activity, Lock, WifiOff } from "lucide-react"
 import LoginForm from "./LoginForm"
 import ForgotPasswordForm from "./ForgotPasswordForm"
 import { useAuth } from "@/contexts/AfiaAuthContext"
@@ -25,38 +25,38 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 sm:p-6 lg:p-10 relative overflow-hidden">
+    <main className="min-h-[100dvh] w-full bg-slate-50 dark:bg-slate-950 flex flex-col justify-center items-center py-4 px-3 sm:px-6 lg:py-10 lg:px-8 relative overflow-x-hidden">
       {/* Subtle ambient clinical illumination */}
       <div 
         aria-hidden="true" 
-        className="pointer-events-none absolute -top-40 -left-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl" 
+        className="pointer-events-none absolute -top-40 -left-40 w-72 sm:w-96 h-72 sm:h-96 bg-emerald-500/10 rounded-full blur-3xl" 
       />
       <div 
         aria-hidden="true" 
-        className="pointer-events-none absolute -bottom-40 -right-40 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl" 
+        className="pointer-events-none absolute -bottom-40 -right-40 w-72 sm:w-96 h-72 sm:h-96 bg-teal-500/10 rounded-full blur-3xl" 
       />
 
-      <div className="w-full max-w-6xl grid lg:grid-cols-12 gap-8 lg:gap-12 items-center relative z-10">
-        {/* Left Column: Clinical Gateway & Authentication Form (Cols 7 on lg) */}
-        <div className="lg:col-span-7 xl:col-span-6 w-full">
-          <Card className="border border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-900/90 shadow-2xl shadow-slate-900/5 backdrop-blur-xl rounded-2xl overflow-hidden">
-            {/* Clinical Brand Header */}
-            <div className="px-6 sm:px-8 pt-8 pb-4 text-center border-b border-slate-100 dark:border-slate-800/60">
-              <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-600/20 mb-3.5 ring-4 ring-emerald-50 dark:ring-emerald-950/40">
-                <Stethoscope className="h-7 w-7 text-white stroke-[2.2]" />
+      <div className="w-full max-w-md sm:max-w-lg lg:max-w-6xl grid lg:grid-cols-12 gap-6 lg:gap-12 items-center relative z-10 mx-auto">
+        {/* Left Column: Mobile-First Clinical Gateway & Authentication Form */}
+        <div className="w-full lg:col-span-7 xl:col-span-6">
+          <Card className="border border-slate-200/90 dark:border-slate-800/90 bg-white/95 dark:bg-slate-900/95 shadow-xl sm:shadow-2xl shadow-slate-900/5 backdrop-blur-xl rounded-2xl sm:rounded-3xl overflow-hidden">
+            {/* Clinical Brand Header - Compact on mobile, expansive on desktop */}
+            <header className="px-4 sm:px-8 pt-5 sm:pt-8 pb-3 sm:pb-4 text-center border-b border-slate-100 dark:border-slate-800/70">
+              <div className="mx-auto w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-md shadow-emerald-600/20 mb-2 sm:mb-3.5 ring-3 sm:ring-4 ring-emerald-50 dark:ring-emerald-950/40">
+                <Stethoscope className="h-5 w-5 sm:h-7 sm:w-7 text-white stroke-[2.2]" />
               </div>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 text-[10px] font-semibold tracking-wider text-slate-600 dark:text-slate-300 uppercase mb-2">
+              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 text-[9px] sm:text-[10px] font-semibold tracking-wider text-slate-600 dark:text-slate-300 uppercase mb-1.5 sm:mb-2">
                 Clinical Health Platform
               </div>
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
                 AFIA Health Assistant
               </h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto leading-normal">
                 Authorized clinical portal for healthcare practitioners and partner clinical facilities
               </p>
-            </div>
+            </header>
 
-            <CardContent className="p-6 sm:p-8">
+            <CardContent className="px-3.5 py-4 sm:px-8 sm:py-7">
               {view === 'login' ? (
                 <LoginForm 
                   onSuccess={handleLoginSuccess} 
@@ -72,9 +72,8 @@ export default function AuthPage() {
           </Card>
         </div>
 
-        {/* Right Column: Institutional Platform Showcase (Cols 5 on lg) */}
+        {/* Right Column: Institutional Platform Showcase (Tablet/Desktop) */}
         <div className="hidden lg:flex lg:col-span-5 xl:col-span-6 flex-col space-y-6">
-          {/* Institutional Credibility Badge */}
           <div className="space-y-3">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/80 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-semibold tracking-wide">
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -159,6 +158,6 @@ export default function AuthPage() {
           </div>
         </div>
       </div>
-    </div>
+    </main>
   )
 }
