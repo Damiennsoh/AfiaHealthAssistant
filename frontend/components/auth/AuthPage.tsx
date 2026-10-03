@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Shield, Stethoscope, Activity, Lock } from "lucide-react"
+import { Shield, Stethoscope, Activity, Lock, Sparkles } from "lucide-react"
 import LoginForm from "./LoginForm"
 import ForgotPasswordForm from "./ForgotPasswordForm"
 import { useAuth } from "@/contexts/AfiaAuthContext"
@@ -37,7 +37,7 @@ export default function AuthPage() {
               Afia Health Assistant
             </CardTitle>
             <CardDescription className="text-slate-600">
-              Secure clinical access for healthcare providers
+              Secure clinical access for healthcare providers & reviewers
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -57,11 +57,15 @@ export default function AuthPage() {
         {/* Right Side - Information */}
         <div className="hidden lg:block space-y-6">
           <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold text-slate-800 mb-4">
-              Welcome Back, Healthcare Provider
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100/90 border border-emerald-200 text-emerald-800 text-xs font-semibold mb-3 shadow-xs">
+              <Sparkles className="h-3.5 w-3.5 text-emerald-600 animate-pulse" />
+              Recruiter & Portfolio Live Preview
+            </div>
+            <h1 className="text-4xl font-bold text-slate-800 mb-3">
+              Clinical Care, Everywhere
             </h1>
-            <p className="text-lg text-slate-600">
-              Access your clinical workspace and continue providing quality care to your patients.
+            <p className="text-base text-slate-600">
+              Explore the full system using the 1-click demo accounts on the left or sign in with your credentials.
             </p>
           </div>
 

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, LogIn, Key, Mail, Eye, EyeOff, WifiOff, Search, MapPin, User, Building } from "lucide-react"
+import { Loader2, LogIn, Key, Mail, Eye, EyeOff, WifiOff, Search, MapPin, User, Building, Sparkles, Check, Shield, Stethoscope } from "lucide-react"
 import { useAuth } from "@/contexts/AfiaAuthContext"
 import { afiaAPI } from "@/lib/afia-api"
 
@@ -52,6 +52,10 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
+
+  // Recruiter & Demo quick login state
+  const [quickLoadingType, setQuickLoadingType] = useState<'guest' | 'admin' | null>(null)
+  const [copiedCred, setCopiedCred] = useState<string | null>(null)
 
   // Load clinics when country changes (auto-select if only one)
   useEffect(() => {
@@ -139,6 +143,52 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
     setError(null)
   }
 
+  const copyToClipboard = (text: string, label: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text)
+      setCopiedCred(label)
+      setTimeout(() => setCopiedCred(null), 2000)
+    }
+  }
+
+  const handleQuickLogin = async (type: 'guest' | 'admin') => {
+    setError(null)
+    setIsLoading(true)
+    setQuickLoadingType(type)
+
+    try {
+      if (type === 'guest') {
+        const demoEmail = 'guest@afia.health'
+        const demoPw = 'Demo1234!'
+        setEmail(demoEmail)
+        setPassword(demoPw)
+        setIsSuperAdmin(false)
+
+        // Find demo clinic or fallback to known ID
+        const targetClinic = selectedClinic || clinics.find(c => c.code === 'DEMO-GH01') || (clinics.length > 0 ? clinics[0] : null)
+        const clinicId = targetClinic?.id || '64d5dd15-44c3-4d12-bf2f-5fef517c346e'
+        if (targetClinic) setSelectedClinic(targetClinic)
+
+        await login(demoEmail, demoPw, clinicId, undefined, undefined, 'clinic_admin')
+      } else {
+        const adminEmail = 'admin@afia.health'
+        const adminPw = 'Admin1234!'
+        setEmail(adminEmail)
+        setPassword(adminPw)
+        setIsSuperAdmin(true)
+
+        await login(adminEmail, adminPw, undefined, undefined, undefined, 'super_admin')
+      }
+      onSuccess?.()
+    } catch (err) {
+      console.error('[LoginForm] Quick login error:', err)
+      setError(err instanceof Error ? err.message : 'Demo login failed. If backend is waking up from idle, please retry in 10-15 seconds.')
+    } finally {
+      setIsLoading(false)
+      setQuickLoadingType(null)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -149,8 +199,10 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
     console.log('[LoginForm] Is Super Admin:', isSuperAdmin);
     console.log('[LoginForm] Selected Clinic:', selectedClinic?.name);
 
-    // Super admin login doesn't require clinic selection
-    if (!isSuperAdmin && !selectedClinic) {
+    const isGuest = email.trim().toLowerCase() === 'guest@afia.health';
+
+    // Super admin or guest demo login doesn't strictly block on clinic selection
+    if (!isSuperAdmin && !selectedClinic && !isGuest) {
       setError('Please select a clinic first')
       setIsLoading(false)
       return
@@ -158,13 +210,14 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
 
     try {
       console.log('[LoginForm] Calling login function...');
+      const targetClinicId = isSuperAdmin ? undefined : (selectedClinic?.id || (isGuest ? '64d5dd15-44c3-4d12-bf2f-5fef517c346e' : undefined))
       await login(
         email, 
         password, 
-        isSuperAdmin ? undefined : selectedClinic?.id, 
+        targetClinicId, 
         isSuperAdmin ? undefined : (selectedClinic?.require_staff_id ? staffId : undefined), 
         isSuperAdmin ? undefined : (selectedClinic?.require_department ? department : undefined),
-        isSuperAdmin ? 'super_admin' : undefined
+        isSuperAdmin ? 'super_admin' : (isGuest ? 'clinic_admin' : undefined)
       )
       console.log('[LoginForm] Login function completed successfully');
       console.log('[LoginForm] Calling onSuccess callback...');
@@ -181,6 +234,104 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
 
   return (
     <div className="space-y-5">
+      {/* Recruiter & Guest Demo Quick Access Card */}
+      <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50/90 via-teal-50/60 to-white p-4 shadow-sm relative overflow-hidden">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5">
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1">
+              <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
+              Recruiter & Guest Preview Mode
+            </span>
+          </div>
+          <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
+            Instant 1-Click
+          </span>
+        </div>
+
+        <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+          Test live features with pre-configured accounts:
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {/* Guest Clinician Button */}
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isLoading}
+            onClick={() => handleQuickLogin('guest')}
+            className="h-auto py-2.5 px-3 border-emerald-300 bg-white hover:bg-emerald-50 text-slate-800 flex flex-col items-start justify-center shadow-xs transition-all hover:border-emerald-400 group"
+          >
+            <div className="flex items-center gap-2 w-full">
+              <div className="p-1 rounded bg-emerald-100 text-emerald-700 group-hover:bg-emerald-200 transition-colors">
+                <Stethoscope className="h-4 w-4" />
+              </div>
+              <div className="text-left font-semibold text-xs text-emerald-950 flex-1 truncate">
+                Guest Clinician
+              </div>
+              {quickLoadingType === 'guest' && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600" />
+              )}
+            </div>
+            <span className="text-[10px] text-slate-500 font-normal mt-1 text-left">
+              Patient Care, AI STG & Triage
+            </span>
+          </Button>
+
+          {/* Super Admin Button */}
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isLoading}
+            onClick={() => handleQuickLogin('admin')}
+            className="h-auto py-2.5 px-3 border-slate-300 bg-white hover:bg-slate-50 text-slate-800 flex flex-col items-start justify-center shadow-xs transition-all hover:border-slate-400 group"
+          >
+            <div className="flex items-center gap-2 w-full">
+              <div className="p-1 rounded bg-indigo-100 text-indigo-700 group-hover:bg-indigo-200 transition-colors">
+                <Shield className="h-4 w-4" />
+              </div>
+              <div className="text-left font-semibold text-xs text-slate-900 flex-1 truncate">
+                Super Admin
+              </div>
+              {quickLoadingType === 'admin' && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" />
+              )}
+            </div>
+            <span className="text-[10px] text-slate-500 font-normal mt-1 text-left">
+              Clinic Mgmt, Audit & Security
+            </span>
+          </Button>
+        </div>
+
+        {/* Credentials Pill / Auto-fill hints */}
+        <div className="mt-3 pt-2 border-t border-emerald-100 flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-slate-500">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-slate-400">Credentials:</span>
+            <button
+              type="button"
+              onClick={() => copyToClipboard('guest@afia.health | Demo1234!', 'guest')}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white border border-slate-200 hover:border-emerald-300 text-slate-700 font-mono text-[10px]"
+              title="Click to copy guest login"
+            >
+              guest@afia.health / Demo1234!
+              {copiedCred === 'guest' ? <Check className="h-3 w-3 text-emerald-600" /> : null}
+            </button>
+          </div>
+          <span className="text-[10px] text-emerald-700 font-medium">
+            (or fill below manually)
+          </span>
+        </div>
+      </div>
+
+      <div className="relative flex py-1 items-center">
+        <div className="flex-grow border-t border-slate-200"></div>
+        <span className="flex-shrink mx-3 text-xs text-slate-400 font-medium">Or Sign In Manually</span>
+        <div className="flex-grow border-t border-slate-200"></div>
+      </div>
+
       {/* Error Alert - Always visible at top */}
       {error && (
         <Alert variant="destructive" className="bg-red-50 border-red-200 text-red-800 sticky top-0 z-50 animate-in fade-in">

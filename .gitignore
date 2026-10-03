@@ -67,3 +67,4 @@ frontend/node_modules/
 backend/run_migrations_neon.py
 backend/seed_admin_neon.py
 backend/check_neon_db.py
+backend/seed_demo_neon.py

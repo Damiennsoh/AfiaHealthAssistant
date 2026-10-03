@@ -88,7 +88,10 @@ class AuthService:
 
         # Validate clinic assignment based on role
         if user.role != UserRole.SUPER_ADMIN:
-            if not login_data.clinic_id or user.clinic_id != login_data.clinic_id:
+            if not login_data.clinic_id and user.clinic_id:
+                login_data.clinic_id = user.clinic_id
+                clinic = user.clinic
+            elif not login_data.clinic_id or user.clinic_id != login_data.clinic_id:
                 security_logger.warning(
                     "Login failed: user not in clinic", 
                     email=login_data.email,
