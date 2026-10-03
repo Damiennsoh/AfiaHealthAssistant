@@ -35,7 +35,7 @@ const SyncContext = createContext<SyncContextType>({
 });
 
 export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
+  const { user, isGuestMode } = useAuth();
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [isOnline, setIsOnline] = useState(
@@ -60,12 +60,16 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Auto-sync every 30 seconds when online
+  // Auto-sync every 30 seconds when online — DISABLED for guest demo sessions
   useEffect(() => {
     if (!user) return;
+    if (isGuestMode) {
+      console.log('[Sync] Guest mode — auto-sync disabled. Data stays in sandbox DB only.');
+      return;
+    }
     syncService.startAutoSync(30000);
     return () => syncService.stopAutoSync();
-  }, [user]);
+  }, [user, isGuestMode]);
 
   /**
    * Queue any un-synced IndexedDB records and push to backend.
@@ -73,6 +77,11 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
    */
   const syncToCloud = useCallback(async (): Promise<void> => {
     if (!user) return;
+    // 🪣 GUEST ISOLATION: never push guest sandbox data to the backend
+    if (isGuestMode) {
+      console.log('[Sync] Guest mode — syncToCloud skipped. Sandbox data is local-only.');
+      return;
+    }
     if (!isOnline) {
       console.log('[Sync] Offline — changes queued, will push when online');
       return;
@@ -113,7 +122,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setIsSyncing(false);
     }
-  }, [user, isOnline]);
+  }, [user, isOnline, isGuestMode]);
 
   // Update pending count whenever the queue changes
   useEffect(() => {

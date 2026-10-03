@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { getKey, setActiveKey } from '@/lib/crypto'
 import { afiaAPI } from '@/lib/afia-api'
+import { isGuestEmail, activateGuestDB, activateProdDB } from '@/lib/guest-mode'
 
 // Define the Auth Context State shape
 interface AuthContextType {
@@ -11,6 +12,9 @@ interface AuthContextType {
   token: string | null
   isAuthenticated: boolean
   isLoading: boolean
+  /** True when the logged-in account is the guest demo account (guest@afia.health).
+   *  Components use this to show the sandbox banner and disable sync. */
+  isGuestMode: boolean
   login: (
     email: string,
     password: string,
@@ -136,6 +140,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  // Derive guest mode from the current user’s email
+  const isGuestMode = isGuestEmail(user?.email)
+
   // 1. ASYNC INITIALIZATION: Wait completely for IndexedDB on app mount
   useEffect(() => {
     async function initAuth() {
@@ -144,12 +151,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const localSession = await getSessionFromLocalDB()
         if (localSession && localSession.token) {
           console.log("[AuthContext] Token found locally!")
-          setUser(localSession.user)
+          const restoredUser = localSession.user
+          setUser(restoredUser)
           setToken(localSession.token)
+          // Restore the correct DB routing for the restored session
+          if (isGuestEmail(restoredUser?.email)) {
+            activateGuestDB()
+            console.log('[AuthContext] Restored guest session → sandbox DB active')
+          } else {
+            activateProdDB()
+          }
           // Also set token in localStorage for API calls
           localStorage.setItem('afia_access_token', localSession.token)
         } else {
           console.log("[AuthContext] Token found: false")
+          activateProdDB() // ensure clean state
         }
       } catch (err) {
         console.error("[AuthContext] Error reading IndexedDB session:", err)
@@ -200,6 +216,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await saveSessionToLocalDB(freshUser, freshToken)
       console.log("[AuthContext] IndexedDB caching complete.")
 
+      // 🪣 Guest DB isolation: switch to the sandbox DB BEFORE setting React state
+      //    so that any downstream effect (sync, patient list) uses the right DB.
+      if (isGuestEmail(freshUser?.email)) {
+        activateGuestDB()
+        console.log('[AuthContext] Guest login detected → switching to sandbox DB')
+      } else {
+        activateProdDB()
+      }
+
       // Now update the React state
       setUser(freshUser)
       setToken(freshToken)
@@ -237,6 +262,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     console.log("[AuthContext] Logging out user...")
     setActiveKey(null)
     await clearSessionFromLocalDB()
+    activateProdDB() // always restore prod DB on logout
     setUser(null)
     setToken(null)
     localStorage.removeItem('afia_access_token')
@@ -296,6 +322,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token,
       isAuthenticated: !!user,
       isLoading,
+      isGuestMode,
       login,
       logout,
       can,

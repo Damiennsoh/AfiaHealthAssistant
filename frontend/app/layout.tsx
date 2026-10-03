@@ -8,6 +8,7 @@ import { SyncProvider } from '@/contexts/SyncContext'
 import AuthWrapper from '@/components/auth/AuthWrapper'
 import { ThemeProvider } from "@/components/theme-provider"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
+import GuestSandboxBanner from "@/components/ui/GuestSandboxBanner"
 import './globals.css'
 
 // If you add local font files under /public/fonts, globals.css will load them.
@@ -58,6 +59,7 @@ export default function RootLayout({
         >
           <AuthProvider>
             <SyncProvider>
+              <GuestSandboxBanner />
               <AuthWrapper>
                 {children}
               </AuthWrapper>

@@ -1,8 +1,13 @@
 // IndexedDB database layer for Afia Health Assistant
 // Uses raw IndexedDB for full control over stores and indexes
 import { getActiveKey, encryptData, decryptData } from './crypto';
+import { getActiveDB } from './guest-mode';
 
-const DB_NAME = "afia-health-db";
+// DB_NAME is resolved dynamically at call time so that the guest demo
+// account transparently uses 'afia-health-guest-db' while real clinic
+// staff always use 'afia-health-db'. Never hardcode this constant in
+// openDB() calls — always use getActiveDB() instead.
+const DB_NAME = "afia-health-db"; // fallback — openDB() uses getActiveDB() at runtime
 const DB_VERSION = 5; // Updated to fix missing object stores (aiRequests, uploads)
 
 export interface Patient {
@@ -198,8 +203,11 @@ function openDB(): Promise<IDBDatabase> {
   if (typeof window === "undefined" || !("indexedDB" in window)) {
     return Promise.reject(new Error("IndexedDB is not available in this environment"));
   }
+  // 🔑 Guest isolation: resolve the active DB name at call time so guest users
+  //    always write to 'afia-health-guest-db', never to production data.
+  const activeName = getActiveDB();
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(activeName, DB_VERSION);
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
