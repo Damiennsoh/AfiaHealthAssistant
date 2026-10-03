@@ -2,14 +2,14 @@
 
 > **A privacy-first, offline-capable clinical decision support system for rural healthcare facilities in Ghana and Zimbabwe.**
 
-AFIA is a full-stack, multi-tenant SaaS platform designed to work in environments with unreliable internet connectivity. It combines an AI-powered RAG knowledge engine with GHS Standard Treatment Guidelines, a SOAP-note encounter system, and a secure offline-first architecture.
+AFIA is a full-stack, multi-tenant SaaS platform designed to work in environments with unreliable internet connectivity. It combines an AI-powered RAG knowledge engine with GHS Standard Treatment Guidelines, a SOAP-note encounter system, a secure offline-first architecture, and a fully sandboxed **Guest Preview Mode** for recruiters and evaluators.
 
 **Live Frontend:** [afia-health-assistant-bw-lilac.vercel.app](https://afia-health-assistant-bw-lilac.vercel.app)  
 **Backend API:** [afia-health-assistant-backend.onrender.com](https://afia-health-assistant-backend.onrender.com)
 
 ---
 
-## � Documentation
+## 📚 Documentation
 
 - **[User Manual](./USER_MANUAL.md)** - Comprehensive guide for healthcare providers
 - **[Production Deployment Guide](./PRODUCTION_DEPLOYMENT_GUIDE.md)** - Step-by-step production setup
@@ -20,16 +20,21 @@ AFIA is a full-stack, multi-tenant SaaS platform designed to work in environment
 
 ---
 
-## �📁 Repository Structure
+## 📁 Repository Structure
 
 ```
 afia-health-assistant-bw/
 ├── frontend/                        # Next.js 16 progressive web app
 │   ├── app/                         # App Router pages (login, dashboard, encounters, etc.)
 │   ├── components/                  # React UI components (encounters, patients, AI, etc.)
+│   │   └── ui/GuestSandboxBanner.tsx  # Amber banner shown only during guest sessions
 │   ├── contexts/                    # Auth, permissions, and sync contexts
+│   │   ├── AfiaAuthContext.tsx      # JWT auth + guest DB routing
+│   │   └── SyncContext.tsx         # Cloud sync (disabled for guest sessions)
 │   ├── hooks/                       # Custom hooks (sync, permissions, knowledge base)
 │   ├── lib/                         # API client, IndexedDB service, knowledge loader
+│   │   ├── db.ts                    # IndexedDB layer (dynamically switches DB for guests)
+│   │   └── guest-mode.ts           # Guest identity detection and DB-switcher utilities
 │   ├── workers/                     # Web Worker for offline knowledge search
 │   ├── public/
 │   │   ├── data/                    # Pre-computed GHS/NHIS embeddings (~29MB JSON)
@@ -67,7 +72,7 @@ afia-health-assistant-bw/
 | UI Runtime | **React** | 19.2.1 |
 | Language | **TypeScript** | ^5 |
 | Styling | **TailwindCSS** + Radix UI | 4.x |
-| Local Database | **IndexedDB** via `idb` | ^8.0 |
+| Local Database | **IndexedDB** (raw API, multi-instance) | Native |
 | AI SDK | **Google Generative AI** (Gemini) | ^0.24 |
 | Offline Search | **Web Workers** (Dedicated Worker) | Native |
 | PDF Parsing | **pdf-parse** + PyMuPDF | — |
@@ -93,6 +98,14 @@ afia-health-assistant-bw/
 | Embeddings | **Sentence Transformers** (all-MiniLM-L6-v2) | 3.x |
 | Storage | **MinIO** (S3-compatible) | 7.x |
 | Deployment | **Render.com** (Docker) | — |
+
+### Infrastructure (Production)
+| Service | Platform | Notes |
+|---|---|---|
+| **PostgreSQL** | **Neon** (serverless) | Pooled connection via `pgbouncer`; `sslmode=require` |
+| **Redis** | Render Redis | Internal URL `redis://...` |
+| **Qdrant** | Qdrant Cloud | Free cluster at cloud.qdrant.io |
+| **Object Storage** | MinIO / S3-compatible | Documents and backups |
 
 ### Infrastructure (Local Dev)
 | Service | Purpose |
@@ -122,6 +135,46 @@ afia-health-assistant-bw/
 | 🔑 **Field-level encryption** | AES-256 encryption for sensitive patient data at rest |
 | 📝 **Audit logging** | Immutable, append-only audit trail for every clinical action |
 | 👤 **Super admin global access** | Super admins can manage all clinics without clinic assignment |
+| 🧪 **Guest Preview Mode** | Fully sandboxed demo environment — test data stays local, never touches production |
+
+---
+
+## 🧪 Guest Preview Mode
+
+Recruiters and evaluators can explore the full app without touching any production data.
+
+**How to access:** Open the live URL → click **"Guest Preview Mode"** on the login page.
+
+### How sandbox isolation works
+
+```
+Guest Login (guest@afia.health)
+         │
+         ▼
+ activateGuestDB()          ← writes "afia-health-guest-db" to localStorage
+         │
+         ▼
+  openDB() in db.ts         ← reads active DB name at call-time
+         │
+         ├── Guest → writes to  "afia-health-guest-db"  (isolated sandbox)
+         └── Staff → writes to  "afia-health-db"        (production)
+         │
+         ▼
+  syncToCloud() / auto-sync ← short-circuited for guests (no backend calls)
+         │
+         ▼
+  Amber banner shown        ← "Guest Preview Mode — Sandbox Active"
+```
+
+| Behaviour | Guest | Real clinic staff |
+|---|---|---|
+| IndexedDB database | `afia-health-guest-db` | `afia-health-db` |
+| Cloud sync | ❌ Disabled | ✅ Enabled |
+| Data visible to admins | ❌ Never | ✅ Yes |
+| Sandbox banner | ✅ Shown | ❌ Hidden |
+| Data persists on refresh | ✅ (local only) | ✅ (synced) |
+
+**Guest credentials:** `guest@afia.health` / `Guest1234!` *(provisioned by super admin)*
 
 ---
 
@@ -135,8 +188,8 @@ afia-health-assistant-bw/
 
 ### 1. Clone and configure environment
 ```bash
-git clone https://github.com/Damiennsoh/afia-health-assistant-bw.git
-cd afia-health-assistant-bw
+git clone https://github.com/Damiennsoh/AfiaHealthAssistant.git
+cd AfiaHealthAssistant
 cp .env.template .env   # Edit with your values
 ```
 
@@ -146,16 +199,21 @@ docker compose up -d
 ```
 This starts: PostgreSQL, Redis, Qdrant, MinIO, and the FastAPI backend.
 
-### 3. Create the first super admin
+### 3. Run database migrations
 ```bash
 cd backend
+python -m alembic upgrade head
+```
+
+### 4. Create the first super admin
+```bash
 python scripts/create_superadmin.py \
   --email admin@yourorg.com \
   --name "Admin" \
   --password "SecurePass123!"
 ```
 
-### 4. Start the frontend
+### 5. Start the frontend
 ```bash
 cd frontend
 pnpm install
@@ -172,9 +230,14 @@ Visit [http://localhost:3000](http://localhost:3000) → Select **Ghana** → Se
 |---|---|---|
 | **Frontend** | Vercel | Root Directory = `frontend`, auto-detects Next.js |
 | **Backend** | Render.com | Docker deployment, free tier available |
-| **Database** | Render PostgreSQL | Use Internal URL for same-region services |
+| **Database** | **Neon** (serverless PostgreSQL) | Use pooled connection string; `sslmode=require&channel_binding=require` |
 | **Redis** | Render Redis | Internal URL `redis://...` |
 | **Qdrant** | Qdrant Cloud | Free cluster available at cloud.qdrant.io |
+
+> **After deploying to Render**, run migrations once via the Render shell:
+> ```bash
+> python -m alembic upgrade head
+> ```
 
 See [RENDER_DEPLOYMENT_GUIDE.md](./RENDER_DEPLOYMENT_GUIDE.md) and [VERCEL_DEPLOYMENT_CHECKLIST.md](./VERCEL_DEPLOYMENT_CHECKLIST.md) for step-by-step instructions.
 
@@ -188,11 +251,13 @@ See [RENDER_DEPLOYMENT_GUIDE.md](./RENDER_DEPLOYMENT_GUIDE.md) and [VERCEL_DEPLO
 │  (Frontend)  │                │   (JWT + AES-256)    │
 └──────────────┘                └──────────┬──────────┘
        │                                   │
-       │ IndexedDB                    PostgreSQL
-       │ (Local-first)                (Encrypted fields)
-       │                                   │
-       ▼                              Redis (Sessions)
- Offline Mode                         Qdrant (Vectors)
+       │ IndexedDB (two instances)     Neon PostgreSQL
+       │  ├─ afia-health-db             (Encrypted fields)
+       │  └─ afia-health-guest-db            │
+       │    (sandbox, sync disabled)    Redis (Sessions)
+       │                                Qdrant (Vectors)
+       ▼
+ Offline Mode
  (JWT cached)
 ```
 
@@ -202,11 +267,28 @@ See [RENDER_DEPLOYMENT_GUIDE.md](./RENDER_DEPLOYMENT_GUIDE.md) and [VERCEL_DEPLO
 - **Dual-key lockout**: Local lockout (IndexedDB) + backend lockout (Redis) prevents offline brute-force
 - **CORS** locked to specific Vercel domain
 - **Audit logs**: Append-only, device-fingerprinted, immutable
+- **Guest sandbox**: Completely isolated IndexedDB instance; cloud sync is hard-blocked for guest sessions
 - **Super admin global access**: Super admins can manage all clinics without clinic assignment
 
 ---
 
 ## 🎯 Recent Improvements
+
+### Guest Preview Mode (Sandbox Isolation)
+- **Separate IndexedDB**: Guest sessions write to `afia-health-guest-db`; production data lives in `afia-health-db` — zero cross-contamination
+- **Sync hard-blocked**: `syncToCloud()` and auto-sync are both short-circuited for guests; no guest data ever reaches the backend
+- **DB routing via localStorage**: `openDB()` resolves the active DB name at call-time, so the switch is transparent to all other components
+- **Amber sandbox banner**: A sticky, always-visible banner reminds guests they are in a safe demo environment
+- **Session restore**: On page refresh, the correct DB (prod or sandbox) is re-activated before any component renders
+
+### Production Database
+- **Migrated to Neon** (serverless PostgreSQL): Reduced cold-start times; pooled connections via `pgbouncer`; `sslmode=require` enforced
+- **Clinic provisioning flow**: Super admin login now shows a zero-clinics empty state with guidance rather than a generic error
+
+### Auth & Login UX
+- **Auto clinic resolution**: Backend auto-resolves `clinic_id` for non-admin users so login works without manual clinic selection
+- **Guest Preview Mode branding**: Replaced "Recruiter & Guest Preview Mode" with the cleaner "Guest Preview Mode" label throughout
+- **0-clinics empty state**: Instead of "Failed to fetch clinics", a helpful message guides super admins to provision their first clinic
 
 ### AI Clinical Assistant
 - **Two-Stage Pipeline**: Clean vector search for protocol retrieval + contextual LLM reasoning for patient-specific recommendations
