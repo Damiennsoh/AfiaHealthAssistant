@@ -203,6 +203,7 @@ class AuthService:
                 "role": user.role.value,
                 "is_active": user.is_active,
                 "clinic_id": str(user.clinic_id) if user.clinic_id else None,
+                "clinic_name": user.clinic.name if user.clinic else None,
                 "country_code": country_code,
                 "staff_id": user.staff_id,
                 "department": user.department,

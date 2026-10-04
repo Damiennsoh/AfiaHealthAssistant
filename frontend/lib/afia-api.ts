@@ -224,7 +224,7 @@ class AfiaAPI {
     const response = await this.request<{
       access_token: string;
       refresh_token: string;
-      user: { id: string; email: string; name: string; role: string; clinic_id?: string; country_code?: string; staff_id?: string; department?: string };
+      user: { id: string; email: string; name: string; role: string; clinic_id?: string; clinic_name?: string; country_code?: string; staff_id?: string; department?: string };
     }>('/api/v1/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password, clinic_id: clinicId, staff_id: staffId, department: department, role: role }),
@@ -294,8 +294,10 @@ class AfiaAPI {
       id: string;
       email: string;
       full_name: string;
+      name: string;
       role: string;
       clinic_id?: string;
+      clinic_name?: string;
       country_code?: string;
       staff_id?: string;
       department?: string;
