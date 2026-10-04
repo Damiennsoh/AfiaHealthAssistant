@@ -88,10 +88,10 @@ class PublicClinicResponse(BaseModel):
     country_code: str
     region: Optional[str] = None
     district: Optional[str] = None
-    is_active: bool
-    require_staff_id: bool
-    require_department: bool
-    features: Dict[str, Any]
+    is_active: bool = True
+    require_staff_id: bool = False
+    require_department: bool = False
+    features: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
 class ClinicResponse(ClinicBase):
@@ -99,15 +99,15 @@ class ClinicResponse(ClinicBase):
     id: UUID
     tier: SubscriptionTier
     status: SubscriptionStatus
-    is_active: bool
-    max_users: int
-    max_patients: int
-    max_storage_mb: int
-    offline_enabled: bool
-    offline_device_limit: int
-    require_staff_id: bool
-    require_department: bool
-    features: Dict[str, Any]
+    is_active: bool = True
+    max_users: Optional[int] = 5
+    max_patients: Optional[int] = 10000
+    max_storage_mb: Optional[int] = 1024
+    offline_enabled: Optional[bool] = False
+    offline_device_limit: Optional[int] = 3
+    require_staff_id: Optional[bool] = False
+    require_department: Optional[bool] = False
+    features: Optional[Dict[str, Any]] = Field(default_factory=dict)
     trial_ends_at: Optional[datetime] = None
     subscription_renews_at: Optional[datetime] = None
     admin_email: Optional[str] = None

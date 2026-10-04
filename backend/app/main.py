@@ -176,6 +176,27 @@ async def afia_exception_handler(request: Request, exc: AfiaException):
         headers=response_headers
     )
 
+# Global catch-all exception handler to ensure CORS headers are preserved on 500 errors
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    origin = request.headers.get("origin")
+    response_headers = {}
+
+    if origin and origin in settings.cors_origins_list:
+        response_headers["Access-Control-Allow-Origin"] = origin
+        response_headers["Access-Control-Allow-Credentials"] = "true"
+
+    logger.error(f"Unhandled server error on {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal Server Error",
+            "detail": str(exc) if settings.debug else "An unexpected error occurred.",
+            "path": str(request.url.path),
+        },
+        headers=response_headers,
+    )
+
 # API Routes
 app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
