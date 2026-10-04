@@ -77,3 +77,24 @@ def require_role(roles: list[UserRole]):
 require_super_admin = require_role([UserRole.SUPER_ADMIN])
 require_clinic_admin = require_role([UserRole.SUPER_ADMIN, UserRole.CLINIC_ADMIN])
 require_healthworker = require_role([UserRole.SUPER_ADMIN, UserRole.CLINIC_ADMIN, UserRole.HEALTHWORKER])
+
+
+async def block_demo_clinic_writes(current_user: User = Depends(get_current_active_user)) -> User:
+    """
+    Dependency: block any write (create/update/delete) operation from the guest
+    demo account. The demo clinic is an isolated sandbox — its data must NEVER
+    be persisted in the production database.
+
+    Apply this to every mutating endpoint (POST/PUT/DELETE) that guest users
+    might reach: create_patient, create_encounter, etc.
+    """
+    if current_user.clinic and getattr(current_user.clinic, "is_demo_clinic", False):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This is a read-only evaluation sandbox. "
+                "Data created in the guest demo session is stored locally only "
+                "and cannot be written to the production database."
+            ),
+        )
+    return current_user

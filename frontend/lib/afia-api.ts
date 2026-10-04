@@ -649,8 +649,8 @@ class AfiaAPI {
 
   async createUser(data: {
     email: string;
-    full_name: string;
-    password: string;
+    name: string;         // backend field: 'name'
+    temp_password: string; // backend field: 'temp_password' (min 12 chars)
     role: string;
     clinic_id?: string;
     staff_id?: string;

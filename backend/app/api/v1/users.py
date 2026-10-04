@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Body, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.api.deps import require_clinic_admin, require_super_admin, get_current_active_user
+from app.api.deps import require_clinic_admin, require_super_admin, get_current_active_user, block_demo_clinic_writes
 from app.models.user import User, UserRole
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, PasswordResetRequest
 from app.services.user_service import UserService
@@ -32,9 +32,10 @@ async def list_users(
 async def create_user(
     user_data: UserCreate,
     current_user: User = Depends(require_clinic_admin),
+    _: User = Depends(block_demo_clinic_writes),  # 🔒 Sandbox guard
     db: AsyncSession = Depends(get_db),
 ):
-    """Create new user (admin only) with audit logging."""
+    """Create new user (admin only) with audit logging. Blocked for demo/sandbox accounts."""
     from app.services.audit_service import AuditService
     from app.models.audit import AuditAction
     from sqlalchemy import select
@@ -88,9 +89,10 @@ async def update_user(
     user_id: UUID,
     update_data: UserUpdate,
     current_user: User = Depends(get_current_active_user),
+    _: User = Depends(block_demo_clinic_writes),  # 🔒 Sandbox guard
     db: AsyncSession = Depends(get_db),
 ):
-    """Update user with audit logging."""
+    """Update user with audit logging. Blocked for demo/sandbox accounts."""
     from app.services.audit_service import AuditService
     from app.models.audit import AuditAction
     from sqlalchemy import select
@@ -130,9 +132,10 @@ async def delete_user(
     user_id: UUID,
     delete_data: dict = Body(default=None),
     current_user: User = Depends(require_clinic_admin),
+    _: User = Depends(block_demo_clinic_writes),  # 🔒 Sandbox guard
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete user (soft delete) with compliance reason and audit logging."""
+    """Delete user (soft delete) with compliance reason and audit logging. Blocked for demo/sandbox accounts."""
     from app.services.audit_service import AuditService
     from app.models.audit import AuditAction
     from sqlalchemy import select
@@ -194,10 +197,11 @@ async def reset_password(
 async def update_own_profile(
     profile_data: dict,
     current_user: User = Depends(get_current_active_user),
+    _: User = Depends(block_demo_clinic_writes),  # 🔒 Sandbox guard
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Update own profile (clinic admin only).
+    Update own profile (clinic admin only). Blocked for demo/sandbox accounts.
     Allows updating: name, email, phone, and clinic details (name, email, phone).
     All changes are recorded in the audit log.
     """

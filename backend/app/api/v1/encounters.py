@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.api.deps import require_healthworker, get_current_active_user
+from app.api.deps import require_healthworker, get_current_active_user, block_demo_clinic_writes
 from app.models.user import User
 from app.schemas.encounter import EncounterCreate, EncounterUpdate, EncounterResponse
 from app.services.encounter_service import EncounterService
@@ -32,9 +32,10 @@ async def list_encounters(
 async def create_encounter(
     data: EncounterCreate,
     current_user: User = Depends(require_healthworker),
+    _: User = Depends(block_demo_clinic_writes),  # 🔒 Sandbox guard
     db: AsyncSession = Depends(get_db),
 ):
-    """Create encounter."""
+    """Create encounter. Blocked for demo/sandbox accounts."""
     service = EncounterService(db)
     encounter = await service.create_encounter(data, current_user)
     return await service.to_response(encounter, current_user)
@@ -57,9 +58,10 @@ async def update_encounter(
     encounter_id: UUID,
     data: EncounterUpdate,
     current_user: User = Depends(require_healthworker),
+    _: User = Depends(block_demo_clinic_writes),  # 🔒 Sandbox guard
     db: AsyncSession = Depends(get_db),
 ):
-    """Update encounter."""
+    """Update encounter. Blocked for demo/sandbox accounts."""
     service = EncounterService(db)
     encounter = await service.update_encounter(encounter_id, data, current_user)
     return await service.to_response(encounter, current_user)

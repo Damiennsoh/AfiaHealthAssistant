@@ -27,8 +27,15 @@ async def list_public_clinics(
     """Public/unauthenticated endpoint to list active clinics for login step 1.
     
     Filter by country code and/or search by name or code.
+    Demo clinics (is_demo_clinic=True) are intentionally excluded — they are
+    sandbox-only accounts accessible only via the 1-click guest button.
     """
-    query = select(Clinic).where(and_(Clinic.is_active == True, Clinic.is_deleted == False, Clinic.is_archived == False))
+    query = select(Clinic).where(and_(
+        Clinic.is_active == True,
+        Clinic.is_deleted == False,
+        Clinic.is_archived == False,
+        Clinic.is_demo_clinic == False,   # 🔑 Demo clinics never appear in production login
+    ))
     
     if country_code:
         query = query.where(Clinic.country_code == country_code.upper())
@@ -51,8 +58,16 @@ async def get_public_clinic_by_code(
     clinic_code: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Public/unauthenticated endpoint to get a clinic by its code."""
-    result = await db.execute(select(Clinic).where(and_(Clinic.code == clinic_code.upper(), Clinic.is_active == True, Clinic.is_deleted == False, Clinic.is_archived == False)))
+    """Public/unauthenticated endpoint to get a clinic by its code.
+    Demo clinics are excluded here too — they cannot be targeted by code via public API.
+    """
+    result = await db.execute(select(Clinic).where(and_(
+        Clinic.code == clinic_code.upper(),
+        Clinic.is_active == True,
+        Clinic.is_deleted == False,
+        Clinic.is_archived == False,
+        Clinic.is_demo_clinic == False,   # 🔑 Demo clinics are not publicly discoverable
+    )))
     clinic = result.scalar_one_or_none()
     
     if not clinic:

@@ -18,7 +18,7 @@ import CreateAccountForm from "@/components/auth/CreateAccountForm"
 interface ApiUser {
   id: string;
   email: string;
-  full_name: string;
+  name: string;          // backend returns 'name', not 'full_name'
   role: string;
   clinic_id?: string;
   staff_id?: string;
@@ -191,7 +191,7 @@ export function UserManagement() {
               <TableBody>
                 {users.map((u) => (
                   <TableRow key={u.id}>
-                    <TableCell className="font-medium">{u.full_name}</TableCell>
+                    <TableCell className="font-medium">{u.name}</TableCell>
                     <TableCell>{u.email}</TableCell>
                     <TableCell>{u.staff_id || '-'}</TableCell>
                     <TableCell>{u.department || '-'}</TableCell>
@@ -245,7 +245,7 @@ export function UserManagement() {
               <Card key={u.id} className="p-4">
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex-1">
-                    <h3 className="font-semibold text-lg">{u.full_name}</h3>
+                    <h3 className="font-semibold text-lg">{u.name}</h3>
                     <p className="text-sm text-muted-foreground">{u.email}</p>
                   </div>
                   <Badge variant={u.role === "clinic_admin" || u.role === "super_admin" ? "default" : "secondary"}>
@@ -306,7 +306,7 @@ export function UserManagement() {
             <div className="space-y-4 py-4">
               {userToDelete && (
                 <div className="bg-muted p-3 rounded-md">
-                  <p className="font-medium">{userToDelete.full_name}</p>
+                  <p className="font-medium">{userToDelete.name}</p>
                   <p className="text-sm text-muted-foreground">{userToDelete.email}</p>
                 </div>
               )}

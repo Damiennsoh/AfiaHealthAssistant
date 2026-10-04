@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.api.deps import require_healthworker, get_current_active_user
+from app.api.deps import require_healthworker, get_current_active_user, block_demo_clinic_writes
 from app.models.user import User
 from app.schemas.patient import PatientCreate, PatientUpdate, PatientResponse, PatientSearchResult
 from app.services.patient_service import PatientService
@@ -32,9 +32,10 @@ async def search_patients(
 async def create_patient(
     data: PatientCreate,
     current_user: User = Depends(require_healthworker),
+    _: User = Depends(block_demo_clinic_writes),  # 🔒 Sandbox guard
     db: AsyncSession = Depends(get_db),
 ):
-    """Create patient."""
+    """Create patient. Blocked for demo/sandbox accounts."""
     service = PatientService(db)
     patient = await service.create_patient(data, current_user)
     return await service.to_response(patient)
@@ -69,9 +70,10 @@ async def update_patient(
     patient_id: UUID,
     data: PatientUpdate,
     current_user: User = Depends(require_healthworker),
+    _: User = Depends(block_demo_clinic_writes),  # 🔒 Sandbox guard
     db: AsyncSession = Depends(get_db),
 ):
-    """Update patient."""
+    """Update patient. Blocked for demo/sandbox accounts."""
     service = PatientService(db)
     patient = await service.update_patient(patient_id, data, current_user)
     return await service.to_response(patient)

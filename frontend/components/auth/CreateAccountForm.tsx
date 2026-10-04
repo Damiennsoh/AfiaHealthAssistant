@@ -19,7 +19,7 @@ interface CreateAccountFormProps {
 export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccountFormProps) {
   const { user } = useAuth()
   const [formData, setFormData] = useState({
-    full_name: "",
+    name: "",
     email: "",
     password: "",
     confirmPassword: "",
@@ -42,7 +42,7 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
   }
 
   const validateForm = (): boolean => {
-    if (!formData.full_name.trim()) {
+    if (!formData.name.trim()) {
       setError("Full name is required")
       return false
     }
@@ -57,8 +57,8 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
       return false
     }
     
-    if (formData.password.length < 8) {
-      setError("Password must be at least 8 characters long")
+    if (formData.password.length < 12) {
+      setError("Password must be at least 12 characters long")
       return false
     }
     
@@ -120,8 +120,8 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
     try {
       const response = await afiaAPI.createUser({
         email: formData.email,
-        full_name: formData.full_name,
-        password: formData.password,
+        name: formData.name,
+        temp_password: formData.password,
         role: formData.role,
         staff_id: formData.staff_id || undefined,
         department: formData.department || undefined,
@@ -157,8 +157,8 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
         <Input
           id="full_name"
           type="text"
-          value={formData.full_name}
-          onChange={(e) => handleInputChange("full_name", e.target.value)}
+          value={formData.name}
+          onChange={(e) => handleInputChange("name", e.target.value)}
           placeholder="e.g. Dr. Kwame Mensah"
           required
           disabled={isLoading}
@@ -297,7 +297,7 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
       </div>
 
       <p className="text-[10px] text-slate-500">
-        Password must be at least 8 characters with uppercase, lowercase, and numbers.
+        Password must be at least 12 characters with uppercase, lowercase, and numbers.
       </p>
 
       <div className="flex flex-col gap-2 pt-2">
