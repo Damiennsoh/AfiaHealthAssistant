@@ -69,8 +69,8 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
   const [isLoading, setIsLoading] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
 
-  // Evaluation quick login state
-  const [quickLoadingType, setQuickLoadingType] = useState<'guest' | 'admin' | null>(null)
+  // Evaluation sandbox 1-click login state
+  const [isGuestLoggingIn, setIsGuestLoggingIn] = useState(false)
   const [copiedCred, setCopiedCred] = useState<string | null>(null)
 
   // Load clinics when country changes (auto-select if only one)
@@ -162,40 +162,30 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
     }
   }
 
-  const handleQuickLogin = async (type: 'guest' | 'admin') => {
+  const handleGuestLogin = async () => {
     setError(null)
     setIsLoading(true)
-    setQuickLoadingType(type)
+    setIsGuestLoggingIn(true)
 
     try {
-      if (type === 'guest') {
-        const demoEmail = 'guest@afia.health'
-        const demoPw = 'Demo1234!'
-        setEmail(demoEmail)
-        setPassword(demoPw)
-        setIsSuperAdmin(false)
+      const demoEmail = 'guest@afia.health'
+      const demoPw = 'Demo1234!'
+      setEmail(demoEmail)
+      setPassword(demoPw)
+      setIsSuperAdmin(false)
 
-        const targetClinic = selectedClinic || clinics.find(c => c.code === 'DEMO-GH01') || (clinics.length > 0 ? clinics[0] : null)
-        const clinicId = targetClinic?.id || '64d5dd15-44c3-4d12-bf2f-5fef517c346e'
-        if (targetClinic) setSelectedClinic(targetClinic)
+      const targetClinic = selectedClinic || clinics.find(c => c.code === 'DEMO-GH01') || (clinics.length > 0 ? clinics[0] : null)
+      const clinicId = targetClinic?.id || '64d5dd15-44c3-4d12-bf2f-5fef517c346e'
+      if (targetClinic) setSelectedClinic(targetClinic)
 
-        await login(demoEmail, demoPw, clinicId, undefined, undefined, 'clinic_admin')
-      } else {
-        const adminEmail = 'admin@afia.health'
-        const adminPw = 'Admin1234!'
-        setEmail(adminEmail)
-        setPassword(adminPw)
-        setIsSuperAdmin(true)
-
-        await login(adminEmail, adminPw, undefined, undefined, undefined, 'super_admin')
-      }
+      await login(demoEmail, demoPw, clinicId, undefined, undefined, 'clinic_admin')
       onSuccess?.()
     } catch (err) {
-      console.error('[LoginForm] Quick login error:', err)
-      setError(err instanceof Error ? err.message : 'Authentication failed. Please verify network connectivity and retry.')
+      console.error('[LoginForm] Guest login error:', err)
+      setError(err instanceof Error ? err.message : 'Guest authentication failed. Please verify network connectivity and retry.')
     } finally {
       setIsLoading(false)
-      setQuickLoadingType(null)
+      setIsGuestLoggingIn(false)
     }
   }
 
@@ -245,69 +235,50 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
               Evaluation Sandbox
             </h2>
           </div>
-          <span className="text-[9px] sm:text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-800 px-1.5 sm:px-2 py-0.5 rounded border border-slate-200/80 dark:border-slate-700 flex-shrink-0">
-            1-Click Launch
+          <span className="text-[9px] sm:text-[10px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 sm:px-2 py-0.5 rounded border border-emerald-200/60 dark:border-emerald-800 flex-shrink-0">
+            Isolated Local DB
           </span>
         </div>
 
         <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2.5 leading-snug">
-          Select an evaluation role to test clinical triage and facility governance:
+          Test clinical triage, encounters, and STG guidelines with 1-click guest access in an isolated local database:
         </p>
 
-        {/* 2-Column Responsive Buttons (Even on mobile) */}
-        <div className="grid grid-cols-2 gap-2">
-          {/* Guest Clinician Button */}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={isLoading}
-            onClick={() => handleQuickLogin('guest')}
-            className="h-auto min-h-[52px] sm:min-h-[58px] py-2 px-2.5 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/90 hover:bg-emerald-50/60 dark:hover:bg-slate-800 hover:border-emerald-300 dark:hover:border-emerald-700 active:scale-[0.98] text-slate-800 dark:text-slate-200 flex flex-col items-start justify-center shadow-xs transition-all group"
-          >
-            <div className="flex items-center gap-1.5 w-full">
-              <div className="p-1 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/60 flex-shrink-0">
-                <Stethoscope className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-              </div>
-              <div className="text-left font-semibold text-[11px] sm:text-xs text-slate-900 dark:text-white flex-1 truncate">
-                Clinician
-              </div>
-              {quickLoadingType === 'guest' ? (
-                <Loader2 className="h-3 w-3 animate-spin text-emerald-600 flex-shrink-0" />
-              ) : (
-                <ArrowRight className="h-3 w-3 text-slate-400 group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all flex-shrink-0 hidden xs:block" />
-              )}
+        {/* 1-Click Guest Clinician Button */}
+        <Button
+          type="button"
+          variant="outline"
+          disabled={isLoading}
+          onClick={handleGuestLogin}
+          className="w-full h-auto min-h-[52px] sm:min-h-[56px] py-2 px-3 border-emerald-200/80 dark:border-emerald-800/80 bg-white dark:bg-slate-800/90 hover:bg-emerald-50/70 dark:hover:bg-slate-800 hover:border-emerald-400 dark:hover:border-emerald-600 active:scale-[0.99] text-slate-800 dark:text-slate-200 flex items-center justify-between shadow-xs transition-all group"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/60 flex-shrink-0">
+              <Stethoscope className="h-4 w-4" />
             </div>
-            <span className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-normal mt-0.5 text-left leading-tight truncate w-full">
-              SOAP Notes &amp; Triage
-            </span>
-          </Button>
+            <div className="text-left min-w-0">
+              <div className="font-semibold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
+                <span>Guest Clinician Access</span>
+                <span className="text-[9px] font-normal text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.2 rounded border border-emerald-200/50 dark:border-emerald-800/50">
+                  1-Click
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-500 dark:text-slate-400 font-normal truncate">
+                Patient Records, SOAP Notes &amp; GHS STG Triage
+              </div>
+            </div>
+          </div>
 
-          {/* Super Admin Button */}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={isLoading}
-            onClick={() => handleQuickLogin('admin')}
-            className="h-auto min-h-[52px] sm:min-h-[58px] py-2 px-2.5 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/90 hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-400 dark:hover:border-slate-600 active:scale-[0.98] text-slate-800 dark:text-slate-200 flex flex-col items-start justify-center shadow-xs transition-all group"
-          >
-            <div className="flex items-center gap-1.5 w-full">
-              <div className="p-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 flex-shrink-0">
-                <Shield className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-              </div>
-              <div className="text-left font-semibold text-[11px] sm:text-xs text-slate-900 dark:text-white flex-1 truncate">
-                Global Admin
-              </div>
-              {quickLoadingType === 'admin' ? (
-                <Loader2 className="h-3 w-3 animate-spin text-slate-600 flex-shrink-0" />
-              ) : (
-                <ArrowRight className="h-3 w-3 text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200 group-hover:translate-x-0.5 transition-all flex-shrink-0 hidden xs:block" />
-              )}
-            </div>
-            <span className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-normal mt-0.5 text-left leading-tight truncate w-full">
-              Clinics &amp; Audits
-            </span>
-          </Button>
-        </div>
+          <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 flex-shrink-0 pl-2">
+            {isGuestLoggingIn ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <span className="text-xs font-semibold flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
+                Launch <ArrowRight className="h-3.5 w-3.5" />
+              </span>
+            )}
+          </div>
+        </Button>
 
         {/* Credentials Pill / Auto-fill hints */}
         <div className="mt-2.5 pt-2 border-t border-slate-200/60 dark:border-slate-800 flex flex-wrap items-center justify-between gap-1 text-[10px] sm:text-[11px] text-slate-500">
@@ -326,7 +297,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
             </button>
           </div>
           <span className="text-[9px] sm:text-[10px] text-slate-400">
-            Sandbox Active
+            Cloud Sync Paused
           </span>
         </div>
       </section>
