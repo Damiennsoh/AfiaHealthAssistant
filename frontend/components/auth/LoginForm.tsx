@@ -174,9 +174,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
       setPassword(demoPw)
       setIsSuperAdmin(false)
 
-      const targetClinic = selectedClinic || clinics.find(c => c.code === 'DEMO-GH01') || (clinics.length > 0 ? clinics[0] : null)
-      const clinicId = targetClinic?.id || '64d5dd15-44c3-4d12-bf2f-5fef517c346e'
-      if (targetClinic) setSelectedClinic(targetClinic)
+      const clinicId = '64d5dd15-44c3-4d12-bf2f-5fef517c346e'
 
       await login(demoEmail, demoPw, clinicId, undefined, undefined, 'clinic_admin')
       onSuccess?.()
