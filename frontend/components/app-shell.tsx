@@ -151,12 +151,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sidebar-primary">
             <Heart className="h-5 w-5 text-sidebar-primary-foreground" />
           </div>
-          <div className="flex flex-col">
-            <span className="text-base font-bold tracking-tight text-sidebar-foreground">
+          <div className="flex flex-col min-w-0">
+            <span className="text-base font-bold tracking-tight text-sidebar-foreground truncate">
               Afia Health
             </span>
-            <span className="text-xs text-sidebar-foreground/60">
-              CDSS for CHPS
+            <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 truncate">
+              {user?.clinic_name || "CDSS for CHPS"}
             </span>
           </div>
           <Button
@@ -278,10 +278,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="sr-only">Open sidebar</span>
           </Button>
 
-          <div className="flex flex-1 items-center gap-3">
-            <h1 className="text-lg font-semibold text-foreground lg:hidden">
+          <div className="flex flex-1 flex-col justify-center min-w-0">
+            <h1 className="text-base sm:text-lg font-semibold text-foreground lg:hidden leading-none truncate">
               Afia Health
             </h1>
+            {user?.clinic_name && (
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium lg:hidden truncate leading-tight mt-0.5">
+                {user.clinic_name}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3">

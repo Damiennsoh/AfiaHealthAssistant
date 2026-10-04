@@ -52,13 +52,18 @@ export default function ProfileDropdown({ onSwitchUser }: ProfileDropdownProps) 
           <div className="flex flex-col space-y-1 leading-none">
             <div className="flex items-center gap-2">
               <p className="font-medium">{displayName}</p>
-              <Badge variant="secondary" className="text-[10px] h-4 px-1 bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-0">
-                {user.role}
+              <Badge variant="secondary" className="text-[10px] h-4 px-1 bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-0 capitalize">
+                {user.role?.replace('_', ' ')}
               </Badge>
             </div>
             <p className="w-[200px] truncate text-sm text-muted-foreground">
               {user.email}
             </p>
+            {user.clinic_name && (
+              <p className="w-[200px] truncate text-[11px] font-medium text-emerald-600/80 mt-1">
+                📍 {user.clinic_name}
+              </p>
+            )}
           </div>
         </DropdownMenuLabel>
         

@@ -65,6 +65,8 @@ async def get_current_user_info(
 ):
     """Get current user info."""
     country_code = current_user.clinic.country_code if current_user.clinic else "GH"
+    clinic_name = current_user.clinic.name if current_user.clinic else None
+    
     return {
         "id": str(current_user.id),
         "email": current_user.email,
@@ -74,6 +76,7 @@ async def get_current_user_info(
         "role": current_user.role.value,
         "is_active": current_user.is_active,
         "clinic_id": str(current_user.clinic_id) if current_user.clinic_id else None,
+        "clinic_name": clinic_name,
         "country_code": country_code,
         "staff_id": current_user.staff_id,
         "department": current_user.department,
