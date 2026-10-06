@@ -45,13 +45,13 @@ export default function AuthPage() {
               <div className="mx-auto w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-md shadow-emerald-600/20 mb-2 sm:mb-3.5 ring-3 sm:ring-4 ring-emerald-50 dark:ring-emerald-950/40">
                 <Stethoscope className="h-5 w-5 sm:h-7 sm:w-7 text-white stroke-[2.2]" />
               </div>
-              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 text-[9px] sm:text-[10px] font-semibold tracking-wider text-slate-600 dark:text-slate-300 uppercase mb-1.5 sm:mb-2">
-                Clinical Health Platform
+              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 text-[9px] sm:text-[10px] font-semibold tracking-wider text-slate-600 dark:text-slate-300 uppercase mb-1.5 sm:mb-2 max-w-full overflow-hidden">
+                <span className="truncate">Clinical Health Platform</span>
               </div>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
                 AFIA Health Assistant
               </h1>
-              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto leading-normal">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-[92%] sm:max-w-sm mx-auto leading-snug">
                 Authorized clinical portal for healthcare practitioners and partner clinical facilities
               </p>
             </header>
