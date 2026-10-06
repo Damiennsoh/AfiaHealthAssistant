@@ -227,18 +227,18 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
         className="rounded-xl border border-slate-200/90 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 p-3 sm:p-4 shadow-xs"
       >
         <div className="flex items-center justify-between gap-2 mb-1.5 sm:mb-2">
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
             <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block flex-shrink-0"></span>
             <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200 truncate">
               Evaluation Sandbox
             </h2>
           </div>
-          <span className="text-[9px] sm:text-[10px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 sm:px-2 py-0.5 rounded border border-emerald-200/60 dark:border-emerald-800 flex-shrink-0">
+          <span className="text-[9px] sm:text-[10px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 sm:px-2 py-0.5 rounded border border-emerald-200/60 dark:border-emerald-800 flex-shrink-0 whitespace-nowrap">
             Isolated Local DB
           </span>
         </div>
 
-        <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2.5 leading-snug">
+        <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2.5 leading-snug break-words">
           Test clinical triage, encounters, and STG guidelines with 1-click guest access in an isolated local database:
         </p>
 
@@ -250,14 +250,14 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
           onClick={handleGuestLogin}
           className="w-full h-auto min-h-[52px] sm:min-h-[56px] py-2 px-3 border-emerald-200/80 dark:border-emerald-800/80 bg-white dark:bg-slate-800/90 hover:bg-emerald-50/70 dark:hover:bg-slate-800 hover:border-emerald-400 dark:hover:border-emerald-600 active:scale-[0.99] text-slate-800 dark:text-slate-200 flex items-center justify-between shadow-xs transition-all group"
         >
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/60 flex-shrink-0">
               <Stethoscope className="h-4 w-4" />
             </div>
-            <div className="text-left min-w-0">
-              <div className="font-semibold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
-                <span>Guest Clinician Access</span>
-                <span className="text-[9px] font-normal text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.2 rounded border border-emerald-200/50 dark:border-emerald-800/50">
+            <div className="text-left min-w-0 flex-1">
+              <div className="font-semibold text-xs text-slate-900 dark:text-white flex items-center gap-1.5 min-w-0">
+                <span className="truncate">Guest Clinician Access</span>
+                <span className="text-[9px] font-normal text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-200/50 dark:border-emerald-800/50 flex-shrink-0">
                   1-Click
                 </span>
               </div>
@@ -279,22 +279,22 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
         </Button>
 
         {/* Credentials Pill / Auto-fill hints */}
-        <div className="mt-2.5 pt-2 border-t border-slate-200/60 dark:border-slate-800 flex flex-wrap items-center justify-between gap-1 text-[10px] sm:text-[11px] text-slate-500">
-          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-            <span className="text-slate-400 text-[10px]">Credentials:</span>
+        <div className="mt-2.5 pt-2 border-t border-slate-200/60 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-1 text-[10px] sm:text-[11px] text-slate-500">
+          <div className="flex items-center gap-1.5 flex-wrap min-w-0 w-full sm:w-auto">
+            <span className="text-slate-400 text-[10px] flex-shrink-0">Credentials:</span>
             <button
               type="button"
               onClick={() => copyToClipboard('guest@afia.health | Demo1234!', 'guest')}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-emerald-400 active:bg-slate-50 text-slate-700 dark:text-slate-300 font-mono text-[9px] sm:text-[10px]"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-emerald-400 active:bg-slate-50 text-slate-700 dark:text-slate-300 font-mono text-[9px] sm:text-[10px] min-w-0 flex-1 sm:flex-none overflow-hidden"
               title="Click to copy evaluation credentials"
             >
-              <span>guest@afia.health</span>
-              <span className="text-slate-300">/</span>
-              <span>Demo1234!</span>
-              {copiedCred === 'guest' ? <Check className="h-2.5 w-2.5 text-emerald-600" /> : null}
+              <span className="truncate">guest@afia.health</span>
+              <span className="text-slate-300 flex-shrink-0">/</span>
+              <span className="flex-shrink-0">Demo1234!</span>
+              {copiedCred === 'guest' ? <Check className="h-2.5 w-2.5 text-emerald-600 flex-shrink-0" /> : null}
             </button>
           </div>
-          <span className="text-[9px] sm:text-[10px] text-slate-400">
+          <span className="text-[9px] sm:text-[10px] text-slate-400 flex-shrink-0 self-start sm:self-auto whitespace-nowrap">
             Cloud Sync Paused
           </span>
         </div>
@@ -302,7 +302,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
 
       <div className="relative flex py-0.5 items-center">
         <div className="flex-grow border-t border-slate-200 dark:border-slate-800"></div>
-        <span className="flex-shrink mx-2.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+        <span className="flex-shrink mx-2.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 text-center">
           Or Sign In with Facility Credentials
         </span>
         <div className="flex-grow border-t border-slate-200 dark:border-slate-800"></div>
@@ -330,7 +330,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
         <div className="space-y-3 sm:space-y-4">
           <label 
             htmlFor="superAdmin" 
-            className="flex items-center gap-2.5 p-2 sm:p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800 cursor-pointer active:bg-slate-100 dark:active:bg-slate-800/80 select-none min-h-[44px]"
+            className="flex items-start sm:items-center gap-2.5 p-2 sm:p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800 cursor-pointer active:bg-slate-100 dark:active:bg-slate-800/80 select-none min-h-[44px]"
           >
             <input
               type="checkbox"
@@ -345,7 +345,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
                 }
               }}
               disabled={isLoading}
-              className="h-4 w-4 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500"
+              className="h-4 w-4 mt-0.5 sm:mt-0 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500 flex-shrink-0"
             />
             <span className="text-xs font-medium text-slate-700 dark:text-slate-300 leading-tight">
               Global Administrator Login (Skip Facility Selection)
@@ -432,7 +432,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
                       className="w-full text-left p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-300 dark:hover:border-emerald-700 active:bg-emerald-50 dark:active:bg-slate-800 transition-all min-h-[48px]"
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div className="font-semibold text-xs text-slate-900 dark:text-white truncate">{clinic.name}</div>
                           <div className="text-[10px] text-slate-500 font-mono">{clinic.code}</div>
                           {(clinic.region || clinic.district) && (
@@ -455,11 +455,11 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
         <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
           {selectedClinic && (
             <div className="p-2.5 sm:p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
                 <Building className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="font-semibold text-xs text-slate-900 dark:text-white truncate">{selectedClinic.name}</div>
-                  <div className="text-[10px] font-mono text-slate-500">{selectedClinic.code}</div>
+                  <div className="text-[10px] font-mono text-slate-500 truncate">{selectedClinic.code}</div>
                 </div>
               </div>
               <Button 
@@ -467,7 +467,7 @@ export default function LoginForm({ onSuccess, onForgotPassword }: LoginFormProp
                 variant="ghost" 
                 size="sm" 
                 onClick={handleBack}
-                className="text-xs h-8 px-2 text-slate-600 hover:text-slate-900 flex-shrink-0"
+                className="text-xs h-8 px-2 text-slate-600 hover:text-slate-900 flex-shrink-0 whitespace-nowrap"
               >
                 Change
               </Button>
