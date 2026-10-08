@@ -270,22 +270,270 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+/**
+ * Schema Normalization: Canonicalize encounter data shape from all sources
+ * — local form saves, sync-manager pull payloads, importSyncData raw imports,
+ *   or rows that were persisted under an older/migrated schema (missing fields).
+ *
+ * Also bridges schema mismatch between the cloud REST API (afia-api.ts) which
+ * uses cloud shapes like:
+ *   vitals?: { bp?: string; temperature?: number; pulse?: number;
+ *              respiratory_rate?: number; spo2?: number; weight?; height?; bmi? }
+ *   encounter_date: string; prescriptions?: [...]
+ *
+ * and the local Encounter interface (db.ts line 66) which requires:
+ *   vitals: { temperature, bloodPressureSystolic, bloodPressureDiastolic,
+ *             pulse, respiratoryRate, weight, height, spO2 }
+ *   date: string; symptoms: string[]; drugs: DrugAdministration[];
+ *   labResults: LabResult[]
+ *
+ * Every encounter that enters IndexedDB OR is read from IndexedDB is passed
+ * through this function, so that downstream consumers (encounter-detail,
+ * edit-encounter-modal, useVitalAlerts, AfiaAssistant, etc.) can safely assume
+ * structural fields always exist with the correct shape.
+ */
+export function normalizeEncounterShape(enc: any): Encounter {
+  if (!enc || typeof enc !== "object") {
+    const now = new Date().toISOString();
+    return {
+      id: `migrated_${Math.random().toString(36).slice(2, 10)}`,
+      patientId: "",
+      date: now,
+      vitals: {
+        temperature: "",
+        bloodPressureSystolic: "",
+        bloodPressureDiastolic: "",
+        pulse: "",
+        respiratoryRate: "",
+        weight: "",
+        height: "",
+        spO2: "",
+      },
+      symptoms: [],
+      history: "",
+      diagnosis: "",
+      treatment: "",
+      drugs: [],
+      labResults: [],
+      notes: "",
+      status: "completed",
+      createdAt: now,
+      updatedAt: now,
+    } satisfies Encounter;
+  }
+
+  const now = new Date().toISOString();
+  const out: any = { ...enc };
+  const s = (x: any) => (x === null || x === undefined ? "" : String(x));
+
+  // 1. date → accept cloud's encounter_date as fallback
+  if (!out.date && out.encounter_date) {
+    out.date = out.encounter_date;
+  }
+  if (!out.date) out.date = now;
+
+  // 2. createdAt / updatedAt → accept cloud names as fallback
+  if (!out.createdAt) out.createdAt = out.created_at || now;
+  if (!out.updatedAt) out.updatedAt = out.updated_at || out.updatedAt || now;
+
+  // 2b. notes + status (required in local Encounter TS interface)
+  if (typeof out.notes !== "string") {
+    const noteParts: string[] = [];
+    if (typeof out.clinicalNotes === "string" && out.clinicalNotes) noteParts.push(out.clinicalNotes);
+    if (typeof out.notes_text === "string" && out.notes_text) noteParts.push(out.notes_text);
+    out.notes = noteParts.join("\n\n");
+  }
+  if (out.status !== "in-progress" && out.status !== "completed") {
+    const u = String(out.status ?? "").toLowerCase();
+    if (u === "in_progress" || u === "inprogress" || u === "pending" || u === "draft") {
+      out.status = "in-progress";
+    } else {
+      out.status = "completed";
+    }
+  }
+
+  // 3. Vitals: merge from any source, translate names, coerce types to string
+  const rawV: any = out.vitals ?? {};
+  // bp string in cloud shape "120/80" → split into systolic/diastolic
+  if (rawV.bp && typeof rawV.bp === "string" && !rawV.bloodPressureSystolic && !rawV.bloodPressureDiastolic) {
+    const [sys, dia] = rawV.bp.split(/[\/\-]/);
+    if (sys && !rawV.bloodPressureSystolic) rawV.bloodPressureSystolic = String(sys).trim();
+    if (dia && !rawV.bloodPressureDiastolic) rawV.bloodPressureDiastolic = String(dia).trim();
+  }
+  out.vitals = {
+    temperature: s(rawV.temperature ?? rawV.temp),
+    bloodPressureSystolic: s(rawV.bloodPressureSystolic ?? rawV.systolic ?? rawV.sys_bp),
+    bloodPressureDiastolic: s(rawV.bloodPressureDiastolic ?? rawV.diastolic ?? rawV.dia_bp),
+    pulse: s(rawV.pulse ?? rawV.heart_rate ?? rawV.hr),
+    respiratoryRate: s(rawV.respiratoryRate ?? rawV.respiratory_rate ?? rawV.rr),
+    weight: s(rawV.weight),
+    height: s(rawV.height),
+    spO2: s(rawV.spO2 ?? rawV.spo2 ?? rawV.oxygen_saturation),
+  };
+
+  // 4. Symptoms: prefer symptoms[] array, else split subjective/complaint → words fallback
+  if (!Array.isArray(out.symptoms)) {
+    if (Array.isArray(out.complaints)) {
+      out.symptoms = [...out.complaints];
+    } else if (typeof out.subjective === "string" && out.subjective.length > 0) {
+      out.symptoms = out.subjective
+        .split(/[,.\n]+/)
+        .map((x: string) => x.trim())
+        .filter(Boolean);
+    } else {
+      out.symptoms = [];
+    }
+  }
+
+  // 5. history: accept subjective / presentingComplaint / historyOfComplaint as source
+  if (!out.history) {
+    const parts: string[] = [];
+    if (typeof out.presentingComplaint === "string" && out.presentingComplaint) parts.push(out.presentingComplaint);
+    if (typeof out.historyOfComplaint === "string" && out.historyOfComplaint) parts.push(out.historyOfComplaint);
+    if (typeof out.subjective === "string" && out.subjective && !parts.includes(out.subjective)) parts.push(out.subjective);
+    out.history = parts.join("\n\n");
+  }
+
+  // 6. Drugs: accept drugs[] or cloud-style prescriptions[] → normalize to local DrugAdministration[]
+  //    Local shape: { id, drugName, dosage, frequency, route, startDate, endDate?, prescribedBy, notes?, createdAt }
+  if (!Array.isArray(out.drugs)) {
+    if (Array.isArray(out.prescriptions)) {
+      out.drugs = out.prescriptions.map((p: any, i: number) => {
+        const dosage = s(p.dose ?? p.dosage);
+        const freq = s(p.frequency);
+        const duration = s(p.duration ?? p.days);
+        const start = p.startDate ?? p.start_date ?? out.date ?? now;
+        let end = p.endDate ?? p.end_date ?? null;
+        if (!end && duration && !isNaN(parseFloat(duration))) {
+          const d = new Date(start);
+          d.setDate(d.getDate() + Math.round(parseFloat(duration)));
+          end = d.toISOString();
+        }
+        return {
+          id: p.id || `presc_import_${i}`,
+          drugName: s(p.drug ?? p.name ?? p.drugName),
+          dosage,
+          frequency: freq,
+          route: s(p.route ?? "PO"),
+          startDate: start,
+          endDate: end || undefined,
+          prescribedBy: p.prescribedBy ?? p.prescribed_by ?? p.provider ?? "SYSTEM",
+          notes: s(p.instructions ?? p.notes),
+          createdAt: p.createdAt ?? p.created_at ?? now,
+        };
+      });
+    } else {
+      out.drugs = [];
+    }
+  } else if (Array.isArray(out.drugs) && out.drugs.length > 0) {
+    // Ensure every existing drug entry has all required fields of the local schema
+    out.drugs = out.drugs.map((p: any, i: number) => {
+      const base = typeof p === "object" && p ? p : {};
+      // Legacy shapes (e.g., dose/duration → dosage + start/end date computation)
+      const durationStr = s(base.duration ?? base.days);
+      const start = base.startDate ?? base.start_date ?? out.date ?? now;
+      let end = base.endDate ?? base.end_date ?? null;
+      if (!end && durationStr && !isNaN(parseFloat(durationStr))) {
+        const d = new Date(start);
+        d.setDate(d.getDate() + Math.round(parseFloat(durationStr)));
+        end = d.toISOString();
+      }
+      return {
+        id: base.id || `drug_norm_${i}`,
+        drugName: s(base.drugName ?? base.drug ?? base.name),
+        dosage: s(base.dosage ?? base.dose),
+        frequency: s(base.frequency),
+        route: s(base.route ?? "PO"),
+        startDate: start,
+        endDate: end || undefined,
+        prescribedBy: base.prescribedBy ?? base.prescribed_by ?? base.provider ?? "SYSTEM",
+        notes: s(base.notes ?? base.instructions),
+        createdAt: base.createdAt ?? base.created_at ?? now,
+      };
+    });
+  }
+
+  // 7. LabResults: accept labResults[] or scalar lab_results dict/array
+  //    Local shape: { id, testType, result, normalRange?, unit?, testDate, performedBy, imageUrl?, s3Url?, createdAt }
+  if (!Array.isArray(out.labResults)) {
+    const arr: any[] = [];
+    if (Array.isArray(out.lab_results)) {
+      out.lab_results.forEach((lr: any, i: number) => {
+        arr.push({
+          id: lr.id || `lab_import_${i}`,
+          testType: s(lr.test ?? lr.test_name ?? lr.testType ?? lr.name),
+          result: s(lr.result ?? lr.value),
+          normalRange: s(lr.reference_range ?? lr.ref ?? lr.normalRange),
+          unit: s(lr.unit),
+          testDate: lr.testDate ?? lr.performedAt ?? lr.performed_at ?? lr.date ?? now,
+          performedBy: lr.performedBy ?? lr.performed_by ?? lr.orderedBy ?? "SYSTEM",
+          imageUrl: s(lr.imageUrl ?? lr.image_url ?? lr.image),
+          s3Url: s(lr.s3Url ?? lr.s3_url),
+          createdAt: lr.createdAt ?? lr.created_at ?? now,
+        });
+      });
+    } else if (out.lab_results && typeof out.lab_results === "object" && !Array.isArray(out.lab_results)) {
+      Object.entries(out.lab_results).forEach(([k, v], i) => {
+        arr.push({
+          id: `lab_dict_${i}`,
+          testType: s(k),
+          result: s(v),
+          normalRange: "",
+          unit: "",
+          testDate: now,
+          performedBy: "SYSTEM",
+          createdAt: now,
+        });
+      });
+    }
+    out.labResults = arr;
+  } else if (Array.isArray(out.labResults) && out.labResults.length > 0) {
+    out.labResults = out.labResults.map((lr: any, i: number) => {
+      const base = typeof lr === "object" && lr ? lr : {};
+      return {
+        id: base.id || `lab_norm_${i}`,
+        testType: s(base.testType ?? base.test ?? base.test_name ?? base.testName),
+        result: s(base.result ?? base.value),
+        normalRange: s(base.normalRange ?? base.reference_range ?? base.ref ?? base.referenceRange),
+        unit: s(base.unit),
+        testDate: base.testDate ?? base.performedAt ?? base.performed_at ?? base.date ?? now,
+        performedBy: base.performedBy ?? base.performed_by ?? base.orderedBy ?? "SYSTEM",
+        imageUrl: s(base.imageUrl ?? base.image_url ?? base.image),
+        s3Url: s(base.s3Url ?? base.s3_url),
+        createdAt: base.createdAt ?? base.created_at ?? now,
+      };
+    });
+  }
+
+  // 8. diagnosis / treatment: accept primary_diagnosis + assessment/plan as fallback
+  if (!out.diagnosis) out.diagnosis = s(out.primary_diagnosis ?? out.assessment ?? "");
+  if (!out.treatment) out.treatment = s(out.plan ?? out.treatment_plan ?? "");
+
+  return out as Encounter;
+}
+
 // Crypto Integration Helper
 async function processItemFromDB<T>(storeName: string, item: any): Promise<T> {
   if (!item) return item as T;
   if ((storeName === 'patients' || storeName === 'encounters') && item.__encrypted_payload) {
-    if (!getActiveKey()) return item as T;
+    if (!getActiveKey()) {
+      if (storeName === 'encounters') return normalizeEncounterShape(item) as any as T;
+      return item as T;
+    }
     try {
       const decryptedString = await decryptData(item.__encrypted_payload, getActiveKey()!);
       const decryptedObj = JSON.parse(decryptedString);
-      const result = { ...decryptedObj, ...item };
+      let result: any = { ...decryptedObj, ...item };
       delete result.__encrypted_payload;
+      if (storeName === 'encounters') result = normalizeEncounterShape(result);
       return result as T;
     } catch (err) {
       console.error("Decryption failed for item from DB", err);
+      if (storeName === 'encounters') return normalizeEncounterShape(item) as any as T;
       return item as T;
     }
   }
+  if (storeName === 'encounters') return normalizeEncounterShape(item) as any as T;
   return item as T;
 }
 
@@ -539,7 +787,7 @@ export const encounterDB = {
   getById: (id: string) => getById<Encounter>("encounters", id),
   getByPatient: (patientId: string) =>
     getByIndex<Encounter>("encounters", "patientId", patientId),
-  save: (encounter: Encounter) => put<Encounter>("encounters", encounter),
+  save: (encounter: Encounter | any) => put<Encounter>("encounters", normalizeEncounterShape(encounter)),
   delete: (id: string) => deleteById("encounters", id), // Hard delete
   softDelete: (id: string, adminId?: string) => softDeleteById("encounters", id, adminId), // Soft delete
 };
