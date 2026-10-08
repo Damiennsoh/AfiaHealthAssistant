@@ -583,6 +583,22 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
         return;
       }
 
+      // Defense-in-depth: ensure structural required fields always exist after save.
+      // IndexedDB/migrations or partial saves may leave these undefined at runtime.
+      enc.vitals = enc.vitals ?? {
+        temperature: "",
+        bloodPressureSystolic: "",
+        bloodPressureDiastolic: "",
+        pulse: "",
+        respiratoryRate: "",
+        weight: "",
+        height: "",
+        spO2: "",
+      };
+      enc.symptoms = enc.symptoms ?? [];
+      enc.drugs = enc.drugs ?? [];
+      enc.labResults = enc.labResults ?? [];
+
       enc.diagnosis = structuredResponse.diagnosis;
       enc.treatment = structuredResponse.treatment;
       // Note: NOT marking as completed - allow clinician to manually complete later

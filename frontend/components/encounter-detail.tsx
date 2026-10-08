@@ -411,7 +411,16 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
     );
   }
 
-  const v = encounter.vitals;
+  const v = encounter.vitals ?? {
+    temperature: "",
+    bloodPressureSystolic: "",
+    bloodPressureDiastolic: "",
+    pulse: "",
+    respiratoryRate: "",
+    weight: "",
+    height: "",
+    spO2: "",
+  };
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 pb-24 px-4 sm:px-0">
@@ -610,7 +619,7 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
                         <p className="text-sm font-semibold text-slate-900 leading-relaxed">{encounter.presentingComplaint}</p>
                       ) : (
                         <div className="flex flex-wrap gap-2">
-                          {encounter.symptoms!.map((s: string) => (
+                          {(encounter.symptoms ?? []).map((s: string) => (
                             <Badge key={s} variant="secondary" className="bg-white text-slate-900 border-slate-300 text-sm font-semibold shadow-sm">
                               {s}
                             </Badge>
