@@ -15,13 +15,14 @@ export interface SearchResult {
 export async function performHybridSearch(
   query: string,
   queryVector: number[],
-  maxResults: number = 5
+  maxResults: number = 5,
+  countryCode?: 'GH' | 'ZW'
 ): Promise<SearchResult[]> {
   if (!query.trim()) return [];
 
   const [vectorMatches, keywordMatches] = await Promise.all([
-    queryVector && queryVector.length ? vectorSearch(queryVector, maxResults) : Promise.resolve([]),
-    searchLocalKnowledge(query),
+    queryVector && queryVector.length ? vectorSearch(queryVector, maxResults, countryCode) : Promise.resolve([]),
+    searchLocalKnowledge(query, countryCode),
   ]);
 
   // Map vector cosine scores (roughly -1..1) into 0..1 range

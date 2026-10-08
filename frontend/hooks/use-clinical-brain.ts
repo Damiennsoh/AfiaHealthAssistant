@@ -85,18 +85,18 @@ export function useClinicalBrain() {
     return queryVector;
   };
 
-  const getClinicalMatches = async (query: string, maxResults: number = 3) => {
+  const getClinicalMatches = async (query: string, maxResults: number = 3, countryCode?: 'GH' | 'ZW') => {
     const queryVector = await getQueryVector(query);
 
     // If we could not embed for some reason, hybrid search will still fall back to keyword search
-    const results = await performHybridSearch(query, queryVector, maxResults);
+    const results = await performHybridSearch(query, queryVector, maxResults, countryCode);
     return results;
   };
 
-  const getClinicalContext = async (query: string, maxResults: number = 3): Promise<string> => {
+  const getClinicalContext = async (query: string, maxResults: number = 3, countryCode?: 'GH' | 'ZW'): Promise<string> => {
     if (!query.trim()) return "";
 
-    const results = await getClinicalMatches(query, maxResults);
+    const results = await getClinicalMatches(query, maxResults, countryCode);
     if (results.length === 0) return "";
 
     return results

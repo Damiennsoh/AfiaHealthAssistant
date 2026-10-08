@@ -260,23 +260,57 @@ export function AfiaAssistant() {
       let encounterContext = "";
 
       try {
-        // ==================== STAGE 1: RETRIEVAL (Find Protocol) ====================
+        // ==================== STAGE 0: JURISDICTION CONTEXT ====================
+        // Determine the clinic's country code and lock the retrieval + policy
+        // statement to that jurisdiction. Defaults to Ghana for backwards compat.
+        const clinicCountryCode = (() => {
+          const fromUser = user?.clinic?.country_code ?? user?.country_code;
+          if (fromUser === 'ZW' || fromUser === 'zw' || fromUser === 'GH' || fromUser === 'gh') {
+            return fromUser.toUpperCase() as 'GH' | 'ZW';
+          }
+          return 'GH' as const;
+        })();
+
+        // National policy preamble — this is a HARD safety net that applies
+        // even when retrieval yields 0 chunks (general-knowledge fallback).
+        const nationalPolicyPreamble = (() => {
+          if (clinicCountryCode === 'ZW') {
+            return [
+              "=== JURISDICTION: REPUBLIC OF ZIMBABWE / MOHCC EDLIZ 8TH EDITION (2020) ===",
+              "PRIMARY UNCOMPLICATED MALARIA ACT: Artemether-Lumefantrine (AL, Coartem) — first-line per MOHCC/WHO Zimbabwe.",
+              "  - Artesunate-Amodiaquine (AA) is NOT the Zimbabwe national first-line ACT. Recommend AA ONLY when AL contraindicated and explicitly cite that rationale.",
+              "INSURANCE CONTEXT: Zimbabwe uses Medical Aid Societies (e.g., CIMAS, PSMAS) and ZIMSHIF (Zimbabwe National Health Insurance Scheme) — not NHIS/Ghana.",
+              "CITATION RULE: When citing national protocols use: 'According to the Zimbabwe EDLIZ 8th Edition 2020' or 'Based on the MOHCC Clinical Guidelines'.",
+              "FACILITY CONTEXT: Zimbabwe clinics and hospitals — respect EDLIZ essential medicines formulary when recommending drugs.",
+            ].join("\n");
+          }
+          // Ghana (default)
+          return [
+            "=== JURISDICTION: REPUBLIC OF GHANA / GHS STG 7TH EDITION (2017) + NHIS ML 2025 ===",
+            "PRIMARY UNCOMPLICATED MALARIA ACT: Artesunate-Amodiaquine (AA) — first-line per GHS STG; Artemether-Lumefantrine (AL) is alternative only.",
+            "INSURANCE CONTEXT: NHIS 8-digit member number is the national insurance identifier.",
+            "CITATION RULE: When citing national protocols use: 'According to the GHS STG 7th Edition 2017' or 'Based on GHS Clinical Guidelines' or 'Per NHIS Medicines List 2025'.",
+            "FACILITY CONTEXT: Ghana — CHPS compounds, Health Centres, District/Regional/Teaching Hospitals. Respect NHIS-coverage when suggesting therapies.",
+          ].join("\n");
+        })();
+
+        // ==================== STAGE 1: RETRIEVAL (Find Protocol, scoped to jurisdiction) ====================
         // Build CLEAN search query (diagnosis/complaint only) for accurate search
         const retrievalQuery = buildRetrievalQuery(query, encounter);
         let hasMatch = false;
         let isTrueProtocolMatch = false; // Distinguish true matches from aggressive fallback
         let protocolContextText = "None";
 
-        console.log('[STAGE 1] Starting protocol retrieval for:', retrievalQuery);
+        console.log('[STAGE 1] Starting protocol retrieval for:', retrievalQuery, '| jurisdiction:', clinicCountryCode);
 
         // PRIORITY 1: Local Keyword Search (Fast, Deterministic)
         console.log('[STAGE 1] Attempting keyword search...');
-        const keywordProtocols = await searchKnowledge(retrievalQuery, 5);
+        const keywordProtocols = await searchKnowledge(retrievalQuery, 5, clinicCountryCode);
         
         if (keywordProtocols.length > 0) {
           hasMatch = true;
           isTrueProtocolMatch = true;
-          protocolContextText = formatKnowledgeForAI(keywordProtocols).trim();
+          protocolContextText = formatKnowledgeForAI(keywordProtocols, clinicCountryCode).trim();
           console.log('[STAGE 1] ✓ Protocol found via keyword search:', keywordProtocols.length, 'chunks');
         } else {
           console.log('[STAGE 1] Keyword search returned empty, trying vector search...');
@@ -286,7 +320,7 @@ export function AfiaAssistant() {
             console.log('[STAGE 1] Attempting vector search...');
             // Add timeout to prevent hanging if worker is slow/broken
             const context = await Promise.race([
-              getClinicalContext(retrievalQuery),
+              getClinicalContext(retrievalQuery, 3, clinicCountryCode),
               new Promise<string>((_, reject) =>
                 setTimeout(() => reject(new Error("Vector search timeout")), 8000)
               ),
@@ -353,10 +387,10 @@ export function AfiaAssistant() {
           for (const aggressiveQuery of aggressiveQueries) {
             if (hasMatch) break;
             console.log('[STAGE 1] Trying aggressive query:', aggressiveQuery);
-            const aggressiveResults = await searchKnowledge(aggressiveQuery, 3);
+            const aggressiveResults = await searchKnowledge(aggressiveQuery, 3, clinicCountryCode);
             if (aggressiveResults.length > 0) {
               hasMatch = true;
-              protocolContextText = formatKnowledgeForAI(aggressiveResults).trim();
+              protocolContextText = formatKnowledgeForAI(aggressiveResults, clinicCountryCode).trim();
               console.log('[STAGE 1] ✓ Protocol found via aggressive search:', aggressiveQuery);
               break;
             }
@@ -373,6 +407,7 @@ export function AfiaAssistant() {
         console.log('[STAGE 2] Built encounter context for LLM reasoning');
 
         console.log('[PIPELINE SUMMARY]', {
+          jurisdiction: clinicCountryCode,
           retrievalQuery,
           hasProtocol: hasMatch,
           protocolLength: protocolContextText.length,
@@ -380,27 +415,30 @@ export function AfiaAssistant() {
         });
 
         enhancedPrompt = `
-SYSTEM: You are the Afia Clinical AI. Follow the TWO-STAGE pipeline below.
+${nationalPolicyPreamble}
+
+SYSTEM: You are the Afia Clinical AI. Follow the TWO-STAGE pipeline below. Jurisdiction above MUST take precedence over any conflicting general medical tendency.
 
 === PATIENT DATA (CRITICAL - USE FOR DOSING) ===
 ${encounterContext || 'No patient data available.'}
 
 === STAGE 1: PROTOCOL RETRIEVAL (Already Completed) ===
-The system has searched the national standard treatment guidelines using a targeted query.
+The system has searched the national standard treatment guidelines using a targeted query scoped to this jurisdiction.
 
 PROTOCOLS RETRIEVED:
-${protocolContextText !== "None" ? protocolContextText : "[NO PROTOCOL FOUND - Use general medical knowledge only]"}
+${protocolContextText !== "None" ? protocolContextText : "[NO PROTOCOL FOUND - Use general medical knowledge only, BUT respect the JURISDICTION and FIRST-LINE ACT stated above for all therapy recommendations.]"}
 
 === STAGE 2: CLINICAL REASONING (Your Task) ===
 You must apply the retrieved protocol to the SPECIFIC PATIENT above.
 
 CRITICAL INSTRUCTIONS:
-1. FALLBACK MANDATE: If NO PROTOCOLS were retrieved (above shows "NO PROTOCOL FOUND"), you MUST generate a comprehensive clinical plan using GENERAL MEDICAL KNOWLEDGE. DO NOT return empty fields.
-2. CITATION RULE (STRICT): Only cite the specific national guidelines if actual protocol data was provided above (e.g., "According to GHS STG 7th Edition" for Ghana or "According to EDLIZ 8th Edition" for Zimbabwe). If no protocols found, cite as "General medical knowledge" or "Based on standard clinical practice"
-3. ADAPT the protocol to the patient's age, weight, vitals, and labs shown in PATIENT DATA section
-4. Example: If protocol says "AS-AQ" but patient is 8kg infant, calculate pediatric dose based on weight in PATIENT DATA
-5. DO NOT hallucinate national protocols. If none were provided, be honest that you're using general knowledge
-6. DOSAGE SAFETY RULE: If patient weight shows as "NOT RECORDED" or "⚠️ CRITICAL WARNING" above, you MUST:
+1. JURISDICTION BINDING: The JURISDICTION block at the very top of this prompt overrides any default tendency. For example, if jurisdiction is ZIMBABWE, use Artemether-Lumefantrine (AL) as the default uncomplicated-malaria ACT, NOT Artesunate-Amodiaquine (AA).
+2. FALLBACK MANDATE: If NO PROTOCOLS were retrieved (above shows "NO PROTOCOL FOUND"), you MUST generate a comprehensive clinical plan using GENERAL MEDICAL KNOWLEDGE while still respecting the jurisdiction block's specific rules. DO NOT return empty fields.
+3. CITATION RULE (STRICT): Only cite the specific national guidelines if actual protocol data was provided above (e.g., "According to GHS STG 7th Edition" for Ghana or "According to EDLIZ 8th Edition" for Zimbabwe). If no protocols found, cite as "General medical knowledge" or "Based on standard clinical practice"
+4. ADAPT the protocol to the patient's age, weight, vitals, and labs shown in PATIENT DATA section
+5. Example: If protocol says "AS-AQ" but patient is 8kg infant, calculate pediatric dose based on weight in PATIENT DATA
+6. DO NOT hallucinate national protocols. If none were provided, be honest that you're using general knowledge
+7. DOSAGE SAFETY RULE: If patient weight shows as "NOT RECORDED" or "⚠️ CRITICAL WARNING" above, you MUST:
    - State clearly that dosages are estimates only
    - Advise verifying patient weight before administration
    - Calculate based on typical adult weight (70kg) only if absolutely necessary, with clear disclaimer
@@ -441,6 +479,7 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
             structuredOnly: true,
             prompt: enhancedPrompt,
             context: encounterContext || undefined,
+            countryCode: clinicCountryCode,
           }),
         });
 

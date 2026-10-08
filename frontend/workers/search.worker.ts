@@ -6,7 +6,7 @@
 type SearchMessage = 
   | { type: 'INIT' }
   | { type: 'REFRESH' }
-  | { type: 'SEARCH'; query: string; vector?: number[]; maxResults?: number };
+  | { type: 'SEARCH'; query: string; vector?: number[]; maxResults?: number; countryCode?: 'GH' | 'ZW' };
 
 type WorkerResponse = 
   | { type: 'READY'; count: number }
@@ -60,8 +60,14 @@ function calculateKeywordScore(chunk: any, queryWords: string[]): number {
     if (content.includes(word)) score += 1;
   });
 
-  // Authority boost
-  if (chunk.authority === 'ghs' || chunk.authority === 'nhis') {
+  // Authority boost — covers both Ghana (GHS / NHIS) and Zimbabwe (MOHCC / EDLIZ)
+  const auth = String(chunk.authority || '').toLowerCase();
+  const src = String(chunk.source || '').toLowerCase();
+  if (
+    auth === 'ghs' || auth === 'nhis' ||
+    src.includes('ghs') || src.includes('nhis') ||
+    src.includes('edliz') || src.includes('mohcc')
+  ) {
     score *= 1.2;
   }
 
@@ -163,16 +169,20 @@ self.onmessage = async (e: MessageEvent<SearchMessage>) => {
        return;
     }
 
-    const { query, vector, maxResults = 5 } = e.data as { query: string; vector?: number[]; maxResults?: number };
+    const { query, vector, maxResults = 5, countryCode } = e.data as { query: string; vector?: number[]; maxResults?: number; countryCode?: 'GH' | 'ZW' };
     const queryLower = query.toLowerCase();
     const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
 
-    // HYBRID SCORING STRATEGY
-    // We calculate a composite score:
-    // Final Score = (Vector Similarity * 0.7) + (Keyword Score Normalized * 0.3)
-    // If vector is missing, we rely 100% on keyword score.
+    // Scope chunks to jurisdiction when countryCode is set.
+    // Chunks with no countryCode are retained as cross-jurisdictional (WHO / custom).
+    const scopedChunks = countryCode
+      ? cachedChunks.filter(chunk => {
+          const cc = typeof chunk.countryCode === 'string' ? chunk.countryCode.toUpperCase() : undefined;
+          return !cc || cc === countryCode;
+        })
+      : cachedChunks;
 
-    const scoredResults = cachedChunks.map(chunk => {
+    const scoredResults = scopedChunks.map(chunk => {
       // 1. Keyword Score
       const keywordScore = calculateKeywordScore(chunk, queryWords);
       

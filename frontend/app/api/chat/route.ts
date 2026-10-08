@@ -105,6 +105,64 @@ REQUIRED JSON SCHEMA (output this and nothing else):
 
 DISCLAIMER RULE: Set "isDisclaimer" to true if you are relying on general medical knowledge because specific GHS protocols were not found.`;
 
+// Builds a jurisdiction-aware system prompt that overrides the Ghana-only defaults
+// when the client explicitly sends a clinic countryCode. Static prompts are left
+// untouched so non-clinic chat flows continue to default to Ghana (legacy compat).
+function buildJurisdictionAwarePrompt(
+  basePrompt: string,
+  countryCode?: 'GH' | 'ZW'
+): string {
+  if (countryCode !== 'ZW') {
+    // Ghana default — base prompts are already Ghana, but add EDLIZ citation detector too
+    return (
+      basePrompt +
+      "\n\n# CITATION EXTENDED FORMAT\n" +
+      "- When referring to Zimbabwe documents cite: MOHCC EDLIZ 8th Edition, 2020 or Zimbabwe Essential Medicines List\n" +
+      "- Detect these source strings as citation targets: EDLIZ, MOHCC, ZIMBABWE, MOHTA\n"
+    );
+  }
+  const zwOverride = `
+# JURISDICTION OVERRIDE — REPUBLIC OF ZIMBABWE (MOHCC)
+This session is bound to ZIMBABWE national policy. All previous default references to Ghana, GHS STG, NHIS are SUPPRESSED for this turn.
+
+APPLICABLE NATIONAL DOCUMENTS:
+- MOHCC EDLIZ 8th Edition, 2020 (Essential Drugs List of Zimbabwe + Standard Treatment Guidelines)
+- Zimbabwe National Malaria Treatment Guidelines
+- ZIMSHIF (Zimbabwe National Health Insurance Scheme) / Medical Aid Schemes (CIMAS, PSMAS, etc.) — NOT NHIS
+
+MALARIA FIRST-LINE RULE (ZIMBABWE MANDATORY):
+- UNCOMPLICATED P. falciparum malaria: ARTEMETHER-LUMEFANTRINE (AL, Coartem) is the FIRST-LINE ACT.
+- Artesunate-Amodiaquine (AA) is NOT the Zimbabwe national first-line. Recommend AA ONLY when AL is contraindicated AND state the rationale clearly.
+
+FACILITY & PRESCRIBING CONTEXT:
+- Respect the EDLIZ formulary as primary drug reference
+- When no protocol was retrieved, the JURISDICTION block above still applies to general-knowledge recommendations.
+
+CITATION PHRASES USED FOR ZIMBABWE:
+- "According to the MOHCC EDLIZ 8th Edition 2020"
+- "Per the Zimbabwe Standard Treatment Guidelines"
+- "Based on MOHCC clinical recommendations"
+- When citing explicitly from documents tagged "mohcc" or "edliz" prefer those phrases.
+`;
+  return basePrompt + "\n" + zwOverride;
+}
+
+function buildStructuredPrompt(countryCode?: 'GH' | 'ZW'): string {
+  const base = STRUCTURED_SYSTEM_PROMPT;
+  if (countryCode !== 'ZW') return base;
+  return (
+    base.replace(
+      '"isDisclaimer" to true if you are relying on general medical knowledge because specific GHS protocols were not found.',
+      '"isDisclaimer" to true if you are relying on general medical knowledge because specific EDLIZ / national protocols were not found.'
+    ) +
+    `
+JURISDICTION: ZIMBABWE — MOHCC EDLIZ 8th Edition 2020 applies.
+MALARIA FIRST-LINE: Artemether-Lumefantrine (AL). Artesunate-Amodiaquine (AA) only when AL contraindicated.
+INSURANCE: ZIMSHIF or Medical Aid Society membership number — NOT NHIS.
+`
+  );
+}
+
 function firstNonEmptyString(candidates: any[]): string | null {
   for (const c of candidates) {
     if (typeof c === "string") {
@@ -245,13 +303,20 @@ export async function POST(req: Request) {
       protocols,
       structuredOnly,
       prompt: bodyPrompt,
+      countryCode: rawCountryCode,
     } = body as {
       messages?: unknown[];
       context?: string;
       protocols?: KnowledgeChunk[];
       structuredOnly?: boolean;
       prompt?: string;
+      countryCode?: string;
     };
+    const countryCode = (rawCountryCode === 'ZW' || rawCountryCode === 'zw')
+      ? 'ZW' as const
+      : (rawCountryCode === 'GH' || rawCountryCode === 'gh')
+        ? 'GH' as const
+        : undefined;
 
     // Structured-only mode: single prompt, return JSON object
     if (structuredOnly === true && typeof bodyPrompt === "string" && bodyPrompt.trim()) {
@@ -259,7 +324,7 @@ export async function POST(req: Request) {
       let result;
       try {
         result = await askAfia(userQuery, undefined, {
-          systemOverride: STRUCTURED_SYSTEM_PROMPT,
+          systemOverride: buildStructuredPrompt(countryCode),
           context: context || undefined,
           maxOutputTokens: 2048,
         });
@@ -342,14 +407,22 @@ export async function POST(req: Request) {
     console.log('📖 [CHAT API] Protocols from client:', Array.isArray(protocols) ? protocols.length : 0);
 
     // Format GHS protocols from knowledge admin (client-searched IndexedDB)
+    // Pass countryCode so formatter renders the correct authority header.
     const protocolContext = Array.isArray(protocols) && protocols.length > 0
-      ? formatKnowledgeForAI(protocols)
+      ? formatKnowledgeForAI(protocols, countryCode)
       : undefined;
 
     // Call AI with protocol context injected into system prompt
     let result;
     try {
-      result = await askAfia(userQuery, undefined, { context, protocolContext });
+      // Build a jurisdiction-aware override that suppresses Ghana defaults for Zimbabwe clinics.
+      // askAfia ultimately uses AFIA_INSTRUCTION — apply the same override by extending
+      // the effective systemOverride via the caller's options if askAfia supports them.
+      result = await askAfia(userQuery, undefined, {
+        context,
+        protocolContext,
+        systemOverride: buildJurisdictionAwarePrompt(ENHANCED_SYSTEM_PROMPT, countryCode),
+      });
     } catch (retrievalError) {
       console.error('❌ [CHAT API] Knowledge retrieval failed:', retrievalError);
       // Continue with empty protocols rather than crashing

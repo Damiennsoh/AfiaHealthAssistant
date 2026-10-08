@@ -62,19 +62,17 @@ class KnowledgeSearchService {
     this.worker.postMessage({ type: "INIT" });
   }
 
-  public async search(query: string, maxResults = 5): Promise<SearchResult[]> {
+  public async search(query: string, maxResults = 5, countryCode?: 'GH' | 'ZW'): Promise<SearchResult[]> {
     if (!this.worker) this.initWorker();
 
     return new Promise((resolve, reject) => {
-      // Store the promise handlers
-      // In a real multi-concurrent system, we'd use unique IDs for each message.
-      // For this single-user search bar, "latest" is sufficient (debouncing happens at UI level).
       this.pendingRequests.set("latest", { resolve, reject });
 
       this.worker?.postMessage({
         type: "SEARCH",
         query,
-        maxResults
+        maxResults,
+        countryCode
       });
     });
   }

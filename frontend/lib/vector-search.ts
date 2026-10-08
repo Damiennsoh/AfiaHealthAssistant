@@ -29,7 +29,8 @@ function cosineSimilarity(a: number[], b: number[]): number {
 
 export async function vectorSearch(
   queryVector: number[],
-  maxResults: number = 5
+  maxResults: number = 5,
+  countryCode?: 'GH' | 'ZW'
 ): Promise<VectorSearchResult[]> {
   if (!queryVector || queryVector.length === 0) return [];
   if (typeof indexedDB === "undefined") return [];
@@ -60,7 +61,14 @@ export async function vectorSearch(
 
       getAllRequest.onsuccess = () => {
         const allChunks = getAllRequest.result as KnowledgeChunk[];
-        const withEmbeddings = allChunks.filter(
+        const scopedChunks = countryCode
+          ? allChunks.filter((c) => {
+              const cc = (c as KnowledgeChunk & { countryCode?: string }).countryCode;
+              return !cc || cc.toUpperCase() === countryCode;
+            })
+          : allChunks;
+
+        const withEmbeddings = scopedChunks.filter(
           (c) => Array.isArray(c.embedding) && c.embedding.length === queryVector.length
         );
 
