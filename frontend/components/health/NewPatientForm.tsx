@@ -19,11 +19,18 @@ export default function NewPatientForm() {
   const { user } = useAuth()
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Form state
+  // Jurisdiction-aware default: read clinic country_code (fallback to user.country_code or "GH")
+  const countryCodeRaw = (user?.clinic?.country_code ?? user?.country_code ?? "GH") as string
+  const countryCode = (countryCodeRaw.toUpperCase() === "ZW" ? "ZW" : "GH") as "GH" | "ZW"
+  const usesNHIS = countryCode === "GH"
+
+  // Form state — insurance umbrella fields cover both Ghana (NHIS) and Zimbabwe (Medical Aid / ZIMSHIF)
   const [formData, setFormData] = useState({
     name: "",
     nhisNumber: "",
-    hasNHIS: true,
+    hasNHIS: usesNHIS ? true : false,
+    medicalAidNumber: "",
+    hasInsurance: usesNHIS ? true : false,
     age: "",
     sex: "",
     region: "",
@@ -59,17 +66,26 @@ export default function NewPatientForm() {
     const errors: string[] = []
 
     if (!formData.name.trim()) errors.push("Patient name is required")
-    if (formData.hasNHIS && !formData.nhisNumber.trim()) errors.push("NHIS number is required when NHIS is selected")
     if (!formData.age || parseInt(formData.age) < 0 || parseInt(formData.age) > 120) {
       errors.push("Valid age is required")
     }
     if (!formData.sex) errors.push("Gender is required")
-    if (!formData.region) errors.push("Region is required")
+    if (!formData.region) errors.push(countryCode === "ZW" ? "Province is required" : "Region is required")
     if (!formData.community.trim()) errors.push("Community/Town is required")
 
-    // NHIS number validation (8 digits) - only if hasNHIS is true
-    if (formData.hasNHIS && formData.nhisNumber && !/^\d{8}$/.test(formData.nhisNumber)) {
-      errors.push("NHIS number must be 8 digits (e.g., 57684276)")
+    if (usesNHIS) {
+      // Ghana — NHIS 8-digit strict validation
+      if (formData.hasInsurance && !formData.nhisNumber.trim()) {
+        errors.push("NHIS number is required when NHIS is selected")
+      }
+      if (formData.hasInsurance && formData.nhisNumber && !/^\d{8}$/.test(formData.nhisNumber)) {
+        errors.push("NHIS number must be 8 digits (e.g., 57684276)")
+      }
+    } else {
+      // Zimbabwe — Medical Aid / ZIMSHIF flexible validation
+      if (formData.hasInsurance && !formData.medicalAidNumber.trim()) {
+        errors.push("Medical Aid / ZIMSHIF number is required when insurance is selected")
+      }
     }
 
     return errors
@@ -90,12 +106,27 @@ export default function NewPatientForm() {
       // Generate folder number only when actually saving
       const finalFolderNumber = await generateFolderNumber()
       const now = new Date().toISOString()
+
+      // Always populate legacy NHIS shape for Ghana (and leave empty shape for ZW)
+      // so sync paths that still read nhisNumber/hasNHIS don't break.
+      const finalNHISNumber = usesNHIS && formData.hasInsurance
+        ? formData.nhisNumber.trim()
+        : undefined
+      const finalHasNHIS = usesNHIS ? !!formData.hasInsurance : false
+
+      const finalMedicalAidNumber = !usesNHIS && formData.hasInsurance
+        ? formData.medicalAidNumber.trim()
+        : undefined
+
       const patient = {
         id: generateId(),
         folderNumber: finalFolderNumber,
         name: formData.name.trim(),
-        nhisNumber: formData.hasNHIS ? formData.nhisNumber.trim() : undefined,
-        hasNHIS: formData.hasNHIS,
+        countryCode,
+        nhisNumber: finalNHISNumber,
+        hasNHIS: finalHasNHIS,
+        medicalAidNumber: finalMedicalAidNumber,
+        hasInsurance: !!formData.hasInsurance,
         age: parseInt(formData.age),
         sex: formData.sex as "male" | "female",
         region: formData.region,
@@ -121,7 +152,9 @@ export default function NewPatientForm() {
       setFormData({
         name: "",
         nhisNumber: "",
-        hasNHIS: true,
+        hasNHIS: usesNHIS ? true : false,
+        medicalAidNumber: "",
+        hasInsurance: usesNHIS ? true : false,
         age: "",
         sex: "",
         region: "",
@@ -149,8 +182,9 @@ export default function NewPatientForm() {
         <CardHeader className="bg-emerald-50 border-b border-emerald-100">
           <CardTitle className="text-emerald-800 flex items-center gap-2">
             New Patient Registration
-            <span className="text-xs bg-emerald-600 text-white px-2 py-1 rounded-full">
-              GHS
+            <span className="text-xs px-2 py-1 rounded-full text-white"
+              style={{ backgroundColor: countryCode === "ZW" ? "#d32f2f" : "#059669" }}>
+              {countryCode === "ZW" ? "MOHCC ZW" : "GHS"}
             </span>
             {folderNumber && (
               <span className="text-xs bg-blue-600 text-white px-2 py-1 rounded-full ml-auto">
@@ -178,36 +212,72 @@ export default function NewPatientForm() {
                 />
               </div>
 
+              {/* Jurisdiction-aware insurance column */}
               <div className="space-y-2">
-                <Label htmlFor="nhisNumber">
-                  NHIS Number {formData.hasNHIS && <span className="text-red-500">*</span>}
-                </Label>
-                <div className="flex items-center space-x-2 mb-2">
-                  <input
-                    type="checkbox"
-                    id="hasNHIS"
-                    checked={formData.hasNHIS}
-                    onChange={(e) => handleInputChange("hasNHIS", e.target.checked)}
-                    className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
-                  />
-                  <Label htmlFor="hasNHIS" className="text-sm text-gray-700">
-                    Patient has NHIS insurance
-                  </Label>
-                </div>
-                <Input
-                  id="nhisNumber"
-                  type="text"
-                  value={formData.nhisNumber}
-                  onChange={(e) => handleInputChange("nhisNumber", e.target.value)}
-                  placeholder="e.g., 57684276"
-                  maxLength={8}
-                  className="w-full font-mono"
-                  required={formData.hasNHIS}
-                  disabled={!formData.hasNHIS}
-                />
-                <p className="text-xs text-slate-500">
-                  8-digit NHIS number (e.g., 57684276)
-                </p>
+                {usesNHIS ? (
+                  <>
+                    <Label htmlFor="nhisNumber">
+                      NHIS Number {formData.hasInsurance && <span className="text-red-500">*</span>}
+                    </Label>
+                    <div className="flex items-center space-x-2 mb-2">
+                      <input
+                        type="checkbox"
+                        id="hasInsurance"
+                        checked={formData.hasInsurance}
+                        onChange={(e) => handleInputChange("hasInsurance", e.target.checked)}
+                        className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+                      />
+                      <Label htmlFor="hasInsurance" className="text-sm text-gray-700">
+                        Patient has NHIS insurance
+                      </Label>
+                    </div>
+                    <Input
+                      id="nhisNumber"
+                      type="text"
+                      value={formData.nhisNumber}
+                      onChange={(e) => handleInputChange("nhisNumber", e.target.value)}
+                      placeholder="e.g., 57684276"
+                      maxLength={8}
+                      className="w-full font-mono"
+                      required={formData.hasInsurance}
+                      disabled={!formData.hasInsurance}
+                    />
+                    <p className="text-xs text-slate-500">
+                      8-digit NHIS number (e.g., 57684276)
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <Label htmlFor="medicalAidNumber">
+                      Medical Aid / ZIMSHIF Number {formData.hasInsurance && <span className="text-red-500">*</span>}
+                    </Label>
+                    <div className="flex items-center space-x-2 mb-2">
+                      <input
+                        type="checkbox"
+                        id="hasInsuranceZW"
+                        checked={formData.hasInsurance}
+                        onChange={(e) => handleInputChange("hasInsurance", e.target.checked)}
+                        className="h-4 w-4 text-red-600 rounded focus:ring-red-500"
+                      />
+                      <Label htmlFor="hasInsuranceZW" className="text-sm text-gray-700">
+                        Patient has Medical Aid / ZIMSHIF
+                      </Label>
+                    </div>
+                    <Input
+                      id="medicalAidNumber"
+                      type="text"
+                      value={formData.medicalAidNumber}
+                      onChange={(e) => handleInputChange("medicalAidNumber", e.target.value)}
+                      placeholder="e.g., CIMAS-1234567, PSMAS-78901, or ZIMSHIF member number"
+                      className="w-full font-mono"
+                      required={formData.hasInsurance}
+                      disabled={!formData.hasInsurance}
+                    />
+                    <p className="text-xs text-slate-500">
+                      Enter the Medical Aid or ZIMSHIF membership number. Flexible format supported.
+                    </p>
+                  </>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -263,7 +333,7 @@ export default function NewPatientForm() {
               <LocalitySelector
                 value={{ region: formData.region, community: formData.community }}
                 onChange={handleLocalityChange}
-                countryCode={user?.clinic?.country_code || "GH"}
+                countryCode={countryCode}
               />
             </div>
 

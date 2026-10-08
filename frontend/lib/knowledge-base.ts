@@ -17,7 +17,7 @@ export interface KnowledgeChunk {
   isAuthority?: boolean;
   type?: "protocol" | "guideline" | "reference";
   keywords?: string[];
-  // Optional vector embedding for semantic search
+  countryCode?: string;
   embedding?: number[];
 }
 
@@ -168,11 +168,11 @@ export const knowledgeDB = {
     });
   },
 
-  search: async (query: string): Promise<KnowledgeChunk[]> => {
+  search: async (query: string, countryCode?: 'GH' | 'ZW'): Promise<KnowledgeChunk[]> => {
     // Optimized: Use Web Worker for non-blocking search
     if (typeof window !== 'undefined') {
       try {
-        const results = await knowledgeSearchService.search(query, 5);
+        const results = await knowledgeSearchService.search(query, 5, countryCode);
         return results;
       } catch (e) {
         console.warn("Worker search failed, falling back to main thread:", e);
@@ -182,6 +182,9 @@ export const knowledgeDB = {
 
     // Re-use existing logic but via this method
     const allChunks = await knowledgeDB.getAll();
+    const scopedChunks = countryCode
+      ? allChunks.filter((c) => !c.countryCode || c.countryCode.toUpperCase() === countryCode)
+      : allChunks;
     
     // Simple keyword-based ranking
     const searchTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
@@ -207,7 +210,7 @@ export const knowledgeDB = {
       }
     });
 
-    const matches = allChunks
+    const matches = scopedChunks
       .map(chunk => {
         let score = 0;
         const content = chunk.content.toLowerCase();
@@ -222,8 +225,13 @@ export const knowledgeDB = {
           if (section.includes(query.toLowerCase())) score += 4;
         });
 
-        // Boost official protocols (GHS/NHIS) as primary source of truth
-        if (chunk.source.toLowerCase().includes('ghs') || chunk.source.toLowerCase().includes('nhis') || chunk.isAuthority) {
+        // Boost official protocols (GHS/NHIS for Ghana, MOHCC/EDLIZ for Zimbabwe) as primary source of truth
+        const src = chunk.source.toLowerCase();
+        if (
+          src.includes('ghs') || src.includes('nhis') ||
+          src.includes('edliz') || src.includes('mohcc') ||
+          chunk.isAuthority
+        ) {
           score *= 1.5; 
         }
         
@@ -242,17 +250,34 @@ export const knowledgeDB = {
  * Searches the local IndexedDB for guidelines relevant to the user's query.
  * This function provides server-side access to client-side knowledge base.
  */
-export async function searchLocalKnowledge(query: string): Promise<KnowledgeChunk[]> {
-  return knowledgeDB.search(query);
+export async function searchLocalKnowledge(query: string, countryCode?: 'GH' | 'ZW'): Promise<KnowledgeChunk[]> {
+  return knowledgeDB.search(query, countryCode);
 }
 
 /**
- * Formats knowledge chunks for AI prompt context with country-specific guidance
+ * Formats knowledge chunks for AI prompt context with country-specific guidance.
+ * Infers jurisdiction from the chunk countryCodes themselves so legacy callers that
+ * don't pass countryCode still get the correct authority header.
  */
-export function formatKnowledgeForAI(chunks: KnowledgeChunk[], countryCode: 'GH' | 'ZW' = 'GH'): string {
+export function formatKnowledgeForAI(
+  chunks: KnowledgeChunk[],
+  countryCode?: 'GH' | 'ZW'
+): string {
   if (chunks.length === 0) return "";
-  
-  // Determine which guidelines are being used
+
+  // Infer from the actual retrieved chunks when not explicit
+  const chunkCCs = new Set(
+    chunks
+      .map((c) => c.countryCode?.toUpperCase())
+      .filter((c): c is 'GH' | 'ZW' => c === 'GH' || c === 'ZW')
+  );
+  const effectiveCC: 'GH' | 'ZW' = (() => {
+    if (countryCode === 'GH' || countryCode === 'ZW') return countryCode;
+    if (chunkCCs.size === 1) return Array.from(chunkCCs)[0];
+    // Mixed or none — default to GH to preserve legacy Ghana behaviour
+    return 'GH';
+  })();
+
   const hasGHS = chunks.some(chunk => chunk.source.toLowerCase().includes('ghs') || chunk.source.toLowerCase().includes('stg'));
   const hasNHIS = chunks.some(chunk => chunk.source.toLowerCase().includes('nhis'));
   const hasEDLIZ = chunks.some(chunk => chunk.source.toLowerCase().includes('edliz') || chunk.source.toLowerCase().includes('zimbabwe') || chunk.source.toLowerCase().includes('mohcc'));
@@ -260,10 +285,10 @@ export function formatKnowledgeForAI(chunks: KnowledgeChunk[], countryCode: 'GH'
   let header = "";
   let instructions = "";
   
-  if (countryCode === 'ZW' && hasEDLIZ) {
+  if (effectiveCC === 'ZW' && hasEDLIZ) {
     header = "=== ZIMBABWE ESSENTIAL MEDICINES LIST & STANDARD TREATMENT GUIDELINES (EDLIZ) ===";
     instructions = `INSTRUCTIONS: Use the above EDLIZ protocols as your primary reference. Cite as "According to the Zimbabwe EDLIZ 8th Edition, 2020" or "Based on the MOHCC Clinical Guidelines" when using these protocols.`;
-  } else if (countryCode === 'GH') {
+  } else if (effectiveCC === 'GH') {
     if (hasGHS) {
       header = "=== GHANA HEALTH SERVICE STANDARD TREATMENT GUIDELINES (GHS STG) ===";
       instructions = `INSTRUCTIONS: Use the above GHS protocols as your primary reference. Cite as "According to the GHS STG 7th Edition, 2017" or "Based on the GHS Clinical Guidelines" when using these protocols.`;

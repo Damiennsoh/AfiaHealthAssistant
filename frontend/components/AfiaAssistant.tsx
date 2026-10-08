@@ -260,23 +260,57 @@ export function AfiaAssistant() {
       let encounterContext = "";
 
       try {
-        // ==================== STAGE 1: RETRIEVAL (Find Protocol) ====================
+        // ==================== STAGE 0: JURISDICTION CONTEXT ====================
+        // Determine the clinic's country code and lock the retrieval + policy
+        // statement to that jurisdiction. Defaults to Ghana for backwards compat.
+        const clinicCountryCode = (() => {
+          const fromUser = user?.clinic?.country_code ?? user?.country_code;
+          if (fromUser === 'ZW' || fromUser === 'zw' || fromUser === 'GH' || fromUser === 'gh') {
+            return fromUser.toUpperCase() as 'GH' | 'ZW';
+          }
+          return 'GH' as const;
+        })();
+
+        // National policy preamble — this is a HARD safety net that applies
+        // even when retrieval yields 0 chunks (general-knowledge fallback).
+        const nationalPolicyPreamble = (() => {
+          if (clinicCountryCode === 'ZW') {
+            return [
+              "=== JURISDICTION: REPUBLIC OF ZIMBABWE / MOHCC EDLIZ 8TH EDITION (2020) ===",
+              "PRIMARY UNCOMPLICATED MALARIA ACT: Artemether-Lumefantrine (AL, Coartem) — first-line per MOHCC/WHO Zimbabwe.",
+              "  - Artesunate-Amodiaquine (AA) is NOT the Zimbabwe national first-line ACT. Recommend AA ONLY when AL contraindicated and explicitly cite that rationale.",
+              "INSURANCE CONTEXT: Zimbabwe uses Medical Aid Societies (e.g., CIMAS, PSMAS) and ZIMSHIF (Zimbabwe National Health Insurance Scheme) — not NHIS/Ghana.",
+              "CITATION RULE: When citing national protocols use: 'According to the Zimbabwe EDLIZ 8th Edition 2020' or 'Based on the MOHCC Clinical Guidelines'.",
+              "FACILITY CONTEXT: Zimbabwe clinics and hospitals — respect EDLIZ essential medicines formulary when recommending drugs.",
+            ].join("\n");
+          }
+          // Ghana (default)
+          return [
+            "=== JURISDICTION: REPUBLIC OF GHANA / GHS STG 7TH EDITION (2017) + NHIS ML 2025 ===",
+            "PRIMARY UNCOMPLICATED MALARIA ACT: Artesunate-Amodiaquine (AA) — first-line per GHS STG; Artemether-Lumefantrine (AL) is alternative only.",
+            "INSURANCE CONTEXT: NHIS 8-digit member number is the national insurance identifier.",
+            "CITATION RULE: When citing national protocols use: 'According to the GHS STG 7th Edition 2017' or 'Based on GHS Clinical Guidelines' or 'Per NHIS Medicines List 2025'.",
+            "FACILITY CONTEXT: Ghana — CHPS compounds, Health Centres, District/Regional/Teaching Hospitals. Respect NHIS-coverage when suggesting therapies.",
+          ].join("\n");
+        })();
+
+        // ==================== STAGE 1: RETRIEVAL (Find Protocol, scoped to jurisdiction) ====================
         // Build CLEAN search query (diagnosis/complaint only) for accurate search
         const retrievalQuery = buildRetrievalQuery(query, encounter);
         let hasMatch = false;
         let isTrueProtocolMatch = false; // Distinguish true matches from aggressive fallback
         let protocolContextText = "None";
 
-        console.log('[STAGE 1] Starting protocol retrieval for:', retrievalQuery);
+        console.log('[STAGE 1] Starting protocol retrieval for:', retrievalQuery, '| jurisdiction:', clinicCountryCode);
 
         // PRIORITY 1: Local Keyword Search (Fast, Deterministic)
         console.log('[STAGE 1] Attempting keyword search...');
-        const keywordProtocols = await searchKnowledge(retrievalQuery, 5);
+        const keywordProtocols = await searchKnowledge(retrievalQuery, 5, clinicCountryCode);
         
         if (keywordProtocols.length > 0) {
           hasMatch = true;
           isTrueProtocolMatch = true;
-          protocolContextText = formatKnowledgeForAI(keywordProtocols).trim();
+          protocolContextText = formatKnowledgeForAI(keywordProtocols, clinicCountryCode).trim();
           console.log('[STAGE 1] ✓ Protocol found via keyword search:', keywordProtocols.length, 'chunks');
         } else {
           console.log('[STAGE 1] Keyword search returned empty, trying vector search...');
@@ -286,7 +320,7 @@ export function AfiaAssistant() {
             console.log('[STAGE 1] Attempting vector search...');
             // Add timeout to prevent hanging if worker is slow/broken
             const context = await Promise.race([
-              getClinicalContext(retrievalQuery),
+              getClinicalContext(retrievalQuery, 3, clinicCountryCode),
               new Promise<string>((_, reject) =>
                 setTimeout(() => reject(new Error("Vector search timeout")), 8000)
               ),
@@ -353,10 +387,10 @@ export function AfiaAssistant() {
           for (const aggressiveQuery of aggressiveQueries) {
             if (hasMatch) break;
             console.log('[STAGE 1] Trying aggressive query:', aggressiveQuery);
-            const aggressiveResults = await searchKnowledge(aggressiveQuery, 3);
+            const aggressiveResults = await searchKnowledge(aggressiveQuery, 3, clinicCountryCode);
             if (aggressiveResults.length > 0) {
               hasMatch = true;
-              protocolContextText = formatKnowledgeForAI(aggressiveResults).trim();
+              protocolContextText = formatKnowledgeForAI(aggressiveResults, clinicCountryCode).trim();
               console.log('[STAGE 1] ✓ Protocol found via aggressive search:', aggressiveQuery);
               break;
             }
@@ -373,6 +407,7 @@ export function AfiaAssistant() {
         console.log('[STAGE 2] Built encounter context for LLM reasoning');
 
         console.log('[PIPELINE SUMMARY]', {
+          jurisdiction: clinicCountryCode,
           retrievalQuery,
           hasProtocol: hasMatch,
           protocolLength: protocolContextText.length,
@@ -380,27 +415,30 @@ export function AfiaAssistant() {
         });
 
         enhancedPrompt = `
-SYSTEM: You are the Afia Clinical AI. Follow the TWO-STAGE pipeline below.
+${nationalPolicyPreamble}
+
+SYSTEM: You are the Afia Clinical AI. Follow the TWO-STAGE pipeline below. Jurisdiction above MUST take precedence over any conflicting general medical tendency.
 
 === PATIENT DATA (CRITICAL - USE FOR DOSING) ===
 ${encounterContext || 'No patient data available.'}
 
 === STAGE 1: PROTOCOL RETRIEVAL (Already Completed) ===
-The system has searched the national standard treatment guidelines using a targeted query.
+The system has searched the national standard treatment guidelines using a targeted query scoped to this jurisdiction.
 
 PROTOCOLS RETRIEVED:
-${protocolContextText !== "None" ? protocolContextText : "[NO PROTOCOL FOUND - Use general medical knowledge only]"}
+${protocolContextText !== "None" ? protocolContextText : "[NO PROTOCOL FOUND - Use general medical knowledge only, BUT respect the JURISDICTION and FIRST-LINE ACT stated above for all therapy recommendations.]"}
 
 === STAGE 2: CLINICAL REASONING (Your Task) ===
 You must apply the retrieved protocol to the SPECIFIC PATIENT above.
 
 CRITICAL INSTRUCTIONS:
-1. FALLBACK MANDATE: If NO PROTOCOLS were retrieved (above shows "NO PROTOCOL FOUND"), you MUST generate a comprehensive clinical plan using GENERAL MEDICAL KNOWLEDGE. DO NOT return empty fields.
-2. CITATION RULE (STRICT): Only cite the specific national guidelines if actual protocol data was provided above (e.g., "According to GHS STG 7th Edition" for Ghana or "According to EDLIZ 8th Edition" for Zimbabwe). If no protocols found, cite as "General medical knowledge" or "Based on standard clinical practice"
-3. ADAPT the protocol to the patient's age, weight, vitals, and labs shown in PATIENT DATA section
-4. Example: If protocol says "AS-AQ" but patient is 8kg infant, calculate pediatric dose based on weight in PATIENT DATA
-5. DO NOT hallucinate national protocols. If none were provided, be honest that you're using general knowledge
-6. DOSAGE SAFETY RULE: If patient weight shows as "NOT RECORDED" or "⚠️ CRITICAL WARNING" above, you MUST:
+1. JURISDICTION BINDING: The JURISDICTION block at the very top of this prompt overrides any default tendency. For example, if jurisdiction is ZIMBABWE, use Artemether-Lumefantrine (AL) as the default uncomplicated-malaria ACT, NOT Artesunate-Amodiaquine (AA).
+2. FALLBACK MANDATE: If NO PROTOCOLS were retrieved (above shows "NO PROTOCOL FOUND"), you MUST generate a comprehensive clinical plan using GENERAL MEDICAL KNOWLEDGE while still respecting the jurisdiction block's specific rules. DO NOT return empty fields.
+3. CITATION RULE (STRICT): Only cite the specific national guidelines if actual protocol data was provided above (e.g., "According to GHS STG 7th Edition" for Ghana or "According to EDLIZ 8th Edition" for Zimbabwe). If no protocols found, cite as "General medical knowledge" or "Based on standard clinical practice"
+4. ADAPT the protocol to the patient's age, weight, vitals, and labs shown in PATIENT DATA section
+5. Example: If protocol says "AS-AQ" but patient is 8kg infant, calculate pediatric dose based on weight in PATIENT DATA
+6. DO NOT hallucinate national protocols. If none were provided, be honest that you're using general knowledge
+7. DOSAGE SAFETY RULE: If patient weight shows as "NOT RECORDED" or "⚠️ CRITICAL WARNING" above, you MUST:
    - State clearly that dosages are estimates only
    - Advise verifying patient weight before administration
    - Calculate based on typical adult weight (70kg) only if absolutely necessary, with clear disclaimer
@@ -441,6 +479,7 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
             structuredOnly: true,
             prompt: enhancedPrompt,
             context: encounterContext || undefined,
+            countryCode: clinicCountryCode,
           }),
         });
 
@@ -453,25 +492,92 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
           );
         }
 
-        const data = (await res.json()) as StructuredClinicalResponse;
-        if (
-          typeof data.diagnosis === "string" &&
-          typeof data.treatment === "string" &&
-          typeof data.clinicalNotes === "string" &&
-          typeof data.isDisclaimer === "boolean"
-        ) {
-          setStructuredResponse(data);
-        } else {
-          setStructuredResponse({
-            diagnosis: (data as any).diagnosis ?? "Clinical Assessment Pending",
-            differentialDiagnosis: (data as any).differentialDiagnosis ?? [],
-            treatment: (data as any).treatment ?? String(data),
-            structuredDrugs: (data as any).structuredDrugs ?? [],
-            clinicalNotes: (data as any).clinicalNotes ?? (data as any).historyNote ?? "",
-            followUpInstructions: (data as any).followUpInstructions ?? "",
-            isDisclaimer: (data as any).isDisclaimer ?? !hasMatch,
-          });
+        const rawData: any = await res.json();
+        // Robust client-side normalization: LLM keys vary (diagnosis vs primaryDiagnosis,
+        // treatment vs treatmentPlan), and sometimes it returns empty strings even when
+        // a real text was produced elsewhere (e.g. in assessment or clinicalNotes).
+        const pickFirstNonEmpty = (candidates: any[]): string => {
+          for (const c of candidates) {
+            if (typeof c === "string") {
+              const t = c.trim();
+              if (t.length > 0) return t;
+            } else if (Array.isArray(c)) {
+              const joined = c
+                .filter((x) => typeof x === "string" && x.trim().length > 0)
+                .map((x) => String(x).trim())
+                .join(", ");
+              if (joined.length > 0) return joined;
+            }
+          }
+          return "";
+        };
+        const diagText = pickFirstNonEmpty([
+          rawData?.diagnosis,
+          rawData?.primaryDiagnosis,
+          rawData?.primary_diagnosis,
+          rawData?.diagnoses,
+          rawData?.workingDiagnosis,
+        ]);
+        const treatmentText = pickFirstNonEmpty([
+          rawData?.treatment,
+          rawData?.treatmentPlan,
+          rawData?.treatment_plan,
+          rawData?.plan,
+          rawData?.recommendations,
+        ]);
+        const notesText = pickFirstNonEmpty([
+          rawData?.clinicalNotes,
+          rawData?.historyNote,
+          rawData?.assessment,
+          rawData?.reasoning,
+        ]);
+        const fuText = pickFirstNonEmpty([
+          rawData?.followUpInstructions,
+          rawData?.followUp,
+          rawData?.follow_up,
+        ]);
+        let drugsList: any[] = Array.isArray(rawData?.structuredDrugs) ? rawData!.structuredDrugs : [];
+        if (drugsList.length === 0 && Array.isArray(rawData?.prescriptions)) {
+          drugsList = rawData!.prescriptions.map((p: any) => ({
+            drugName: p?.drug ?? p?.name ?? p?.drugName ?? "",
+            dosage: p?.dose ?? p?.dosage ?? "",
+            frequency: p?.frequency ?? "",
+            route: p?.route ?? "Oral",
+            duration: p?.duration ?? p?.days ?? "",
+            notes: p?.instructions ?? p?.notes ?? "",
+          }));
         }
+        if (drugsList.length === 0 && Array.isArray(rawData?.medications)) {
+          drugsList = rawData!.medications.map((p: any) => ({
+            drugName: p?.drug ?? p?.name ?? p?.drugName ?? "",
+            dosage: p?.dose ?? p?.dosage ?? "",
+            frequency: p?.frequency ?? "",
+            route: p?.route ?? "Oral",
+            duration: p?.duration ?? p?.days ?? "",
+            notes: p?.instructions ?? p?.notes ?? "",
+          }));
+        }
+        drugsList = drugsList.filter((d: any) => typeof d?.drugName === "string" && d.drugName.trim().length > 0);
+
+        let differentials: string[] = Array.isArray(rawData?.differentialDiagnosis)
+          ? rawData!.differentialDiagnosis.filter((d: any) => typeof d === "string" && d.trim())
+          : [];
+        if (differentials.length === 0 && Array.isArray(rawData?.differentials)) {
+          differentials = rawData!.differentials.filter((d: any) => typeof d === "string" && d.trim());
+        }
+
+        const diagnosisFinal = diagText || "Clinical Assessment Pending";
+        const treatmentFinal = treatmentText || notesText || "Treatment plan generated by AI assistant.";
+
+        setStructuredResponse({
+          diagnosis: diagnosisFinal,
+          differentialDiagnosis: differentials,
+          treatment: treatmentFinal,
+          structuredDrugs: drugsList,
+          clinicalNotes: notesText,
+          followUpInstructions: fuText,
+          isDisclaimer: typeof rawData?.isDisclaimer === "boolean" ? rawData!.isDisclaimer : !hasMatch,
+        });
       } catch (err: any) {
         console.error("[AfiaAssistant] Analysis failed:", err);
         setError(err?.message ?? "Something went wrong");
@@ -599,18 +705,72 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
       enc.drugs = enc.drugs ?? [];
       enc.labResults = enc.labResults ?? [];
 
-      enc.diagnosis = structuredResponse.diagnosis;
-      enc.treatment = structuredResponse.treatment;
+      // Final defensive guard: AI returned fields may be empty strings even after
+      // client validation. Prefer explicit structured fields, fall back through
+      // aiDiagnosisData-compatible fields so Mark Complete validation never sees ""
+      const finalDiagnosis =
+        (typeof structuredResponse.diagnosis === "string" && structuredResponse.diagnosis.trim().length > 0)
+          ? structuredResponse.diagnosis.trim()
+          : (typeof (structuredResponse as any).primaryDiagnosis === "string" && (structuredResponse as any).primaryDiagnosis.trim().length > 0)
+            ? (structuredResponse as any).primaryDiagnosis.trim()
+            : (typeof structuredResponse.clinicalNotes === "string" && structuredResponse.clinicalNotes.trim().length > 0)
+              ? "Assessment recorded via AI Assistant"
+              : "Clinical assessment recorded via AI Assistant";
+
+      const finalTreatment =
+        (typeof structuredResponse.treatment === "string" && structuredResponse.treatment.trim().length > 0)
+          ? structuredResponse.treatment.trim()
+          : (structuredResponse.clinicalNotes || "").trim().length > 0
+            ? structuredResponse.clinicalNotes!.trim()
+            : "Treatment plan recommended by AI Assistant";
+
+      const secondaryText =
+        Array.isArray(structuredResponse.differentialDiagnosis) && structuredResponse.differentialDiagnosis.length > 0
+          ? structuredResponse.differentialDiagnosis.join(", ")
+          : "";
+
+      enc.diagnosis = finalDiagnosis;
+      enc.treatment = finalTreatment;
+
+      // Populate unifiedDiagnoses array so encounter-detail validation and
+      // downstream clinical review pages see a formal diagnosis regardless of
+      // which legacy or modern field is inspected.
+      const baseUnified = Array.isArray(enc.unifiedDiagnoses) ? [...enc.unifiedDiagnoses] : [];
+      const existingIds = new Set(baseUnified.map(x => x.id));
+      if (!existingIds.has(`ai-primary-${enc.id}`)) {
+        baseUnified.unshift({
+          id: `ai-primary-${enc.id}`,
+          type: 'primary',
+          diagnosis: finalDiagnosis,
+          source: 'ai',
+          confidence: 1,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      if (secondaryText) {
+        if (!existingIds.has(`ai-secondary-${enc.id}`)) {
+          baseUnified.push({
+            id: `ai-secondary-${enc.id}`,
+            type: 'secondary',
+            diagnosis: secondaryText,
+            source: 'ai',
+            confidence: 0.8,
+            createdAt: new Date().toISOString(),
+          });
+        }
+      }
+      enc.unifiedDiagnoses = baseUnified;
+
       // Note: NOT marking as completed - allow clinician to manually complete later
       enc.updatedAt = new Date().toISOString();
       
-      // Save AI structured data
+      // Save AI structured data (redundant shape used by various render paths)
       enc.aiDiagnosisData = {
-        primaryDiagnosis: structuredResponse.diagnosis,
-        secondaryDiagnosis: "",
-        treatmentPlan: structuredResponse.treatment,
-        clinicalNotes: structuredResponse.clinicalNotes,
-        followUpInstructions: structuredResponse.followUpInstructions,
+        primaryDiagnosis: finalDiagnosis,
+        secondaryDiagnosis: secondaryText,
+        treatmentPlan: finalTreatment,
+        clinicalNotes: structuredResponse.clinicalNotes ?? "",
+        followUpInstructions: structuredResponse.followUpInstructions ?? "",
         appliedAt: new Date().toISOString(),
         confidence: 1,
       };

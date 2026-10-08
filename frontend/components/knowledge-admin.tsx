@@ -525,7 +525,7 @@ export default function KnowledgeAdmin() {
 
           {/* Stats Overview */}
           {stats && (
-            <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Total Chunks</CardTitle>
@@ -560,6 +560,40 @@ export default function KnowledgeAdmin() {
                   <p className="text-xs text-muted-foreground">
                     MOHCC EDLIZ
                   </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Vector Ready</CardTitle>
+                  <Brain className="h-4 w-4 text-purple-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {stats.withEmbeddings ?? stats.embedded ?? 0}
+                    {typeof stats.total === "number" && stats.total > 0 && (
+                      <span className="text-sm font-medium text-muted-foreground ml-2">
+                        / {stats.total}
+                      </span>
+                    )}
+                  </div>
+                  {typeof stats.total === "number" && stats.total > 0 && (
+                    <div className="mt-2">
+                      <Progress
+                        value={Math.round(
+                          ((stats.withEmbeddings ?? stats.embedded ?? 0) / stats.total) * 100
+                        )}
+                        className="h-1.5"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {Math.round(
+                          ((stats.withEmbeddings ?? stats.embedded ?? 0) / stats.total) * 100
+                        )}% of indexed fragments have embeddings
+                      </p>
+                    </div>
+                  )}
+                  {(!stats.total || stats.total === 0) && (
+                    <p className="text-xs text-muted-foreground">Load the knowledge bundle first</p>
+                  )}
                 </CardContent>
               </Card>
               <Card>

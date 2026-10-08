@@ -105,15 +105,158 @@ REQUIRED JSON SCHEMA (output this and nothing else):
 
 DISCLAIMER RULE: Set "isDisclaimer" to true if you are relying on general medical knowledge because specific GHS protocols were not found.`;
 
+// Builds a jurisdiction-aware system prompt that overrides the Ghana-only defaults
+// when the client explicitly sends a clinic countryCode. Static prompts are left
+// untouched so non-clinic chat flows continue to default to Ghana (legacy compat).
+function buildJurisdictionAwarePrompt(
+  basePrompt: string,
+  countryCode?: 'GH' | 'ZW'
+): string {
+  if (countryCode !== 'ZW') {
+    // Ghana default — base prompts are already Ghana, but add EDLIZ citation detector too
+    return (
+      basePrompt +
+      "\n\n# CITATION EXTENDED FORMAT\n" +
+      "- When referring to Zimbabwe documents cite: MOHCC EDLIZ 8th Edition, 2020 or Zimbabwe Essential Medicines List\n" +
+      "- Detect these source strings as citation targets: EDLIZ, MOHCC, ZIMBABWE, MOHTA\n"
+    );
+  }
+  const zwOverride = `
+# JURISDICTION OVERRIDE — REPUBLIC OF ZIMBABWE (MOHCC)
+This session is bound to ZIMBABWE national policy. All previous default references to Ghana, GHS STG, NHIS are SUPPRESSED for this turn.
+
+APPLICABLE NATIONAL DOCUMENTS:
+- MOHCC EDLIZ 8th Edition, 2020 (Essential Drugs List of Zimbabwe + Standard Treatment Guidelines)
+- Zimbabwe National Malaria Treatment Guidelines
+- ZIMSHIF (Zimbabwe National Health Insurance Scheme) / Medical Aid Schemes (CIMAS, PSMAS, etc.) — NOT NHIS
+
+MALARIA FIRST-LINE RULE (ZIMBABWE MANDATORY):
+- UNCOMPLICATED P. falciparum malaria: ARTEMETHER-LUMEFANTRINE (AL, Coartem) is the FIRST-LINE ACT.
+- Artesunate-Amodiaquine (AA) is NOT the Zimbabwe national first-line. Recommend AA ONLY when AL is contraindicated AND state the rationale clearly.
+
+FACILITY & PRESCRIBING CONTEXT:
+- Respect the EDLIZ formulary as primary drug reference
+- When no protocol was retrieved, the JURISDICTION block above still applies to general-knowledge recommendations.
+
+CITATION PHRASES USED FOR ZIMBABWE:
+- "According to the MOHCC EDLIZ 8th Edition 2020"
+- "Per the Zimbabwe Standard Treatment Guidelines"
+- "Based on MOHCC clinical recommendations"
+- When citing explicitly from documents tagged "mohcc" or "edliz" prefer those phrases.
+`;
+  return basePrompt + "\n" + zwOverride;
+}
+
+function buildStructuredPrompt(countryCode?: 'GH' | 'ZW'): string {
+  const base = STRUCTURED_SYSTEM_PROMPT;
+  if (countryCode !== 'ZW') return base;
+  return (
+    base.replace(
+      '"isDisclaimer" to true if you are relying on general medical knowledge because specific GHS protocols were not found.',
+      '"isDisclaimer" to true if you are relying on general medical knowledge because specific EDLIZ / national protocols were not found.'
+    ) +
+    `
+JURISDICTION: ZIMBABWE — MOHCC EDLIZ 8th Edition 2020 applies.
+MALARIA FIRST-LINE: Artemether-Lumefantrine (AL). Artesunate-Amodiaquine (AA) only when AL contraindicated.
+INSURANCE: ZIMSHIF or Medical Aid Society membership number — NOT NHIS.
+`
+  );
+}
+
+function firstNonEmptyString(candidates: any[]): string | null {
+  for (const c of candidates) {
+    if (typeof c === "string") {
+      const t = c.trim();
+      if (t.length > 0) return t;
+    } else if (Array.isArray(c)) {
+      // diagnosis/diagnoses array → join with ", "
+      const joined = c
+        .filter((x) => typeof x === "string" && x.trim().length > 0)
+        .map((x) => String(x).trim())
+        .join(", ");
+      if (joined.length > 0) return joined;
+    }
+  }
+  return null;
+}
+
 function validateAndNormalize(parsed: any): any {
   if (!parsed || typeof parsed !== 'object') return null;
+
+  // Primary diagnosis string — accept common aliases that LLMs return under either prompt schema
+  const diagnosisCandidate = firstNonEmptyString([
+    parsed.diagnosis,
+    parsed.primaryDiagnosis,        // ENHANCED_SYSTEM_PROMPT schema (used by chat-mode LLM)
+    parsed.primary_diagnosis,       // REST API snake_case
+    parsed.workingDiagnosis,
+    parsed.diagnoses,               // LLM plural array form
+    parsed.finalDiagnosis,
+  ]);
+
+  // Treatment summary — accept treatmentPlan alias (chat-mode prompt uses this key)
+  const treatmentCandidate = firstNonEmptyString([
+    parsed.treatment,
+    parsed.treatmentPlan,
+    parsed.treatment_plan,
+    parsed.plan,
+    parsed.recommendations,
+  ]);
+
+  // Clinical notes + historyNote alias
+  const notesCandidate = firstNonEmptyString([
+    parsed.clinicalNotes,
+    parsed.historyNote,
+    parsed.assessment,
+    parsed.reasoning,
+  ]);
+
+  const fuCandidate = firstNonEmptyString([parsed.followUpInstructions, parsed.followUp, parsed.follow_up]);
+
+  // Structured drugs — also accept prescriptions/medications arrays as alternate names
+  let structuredDrugs: any[] = [];
+  if (Array.isArray(parsed.structuredDrugs) && parsed.structuredDrugs.length > 0) {
+    structuredDrugs = parsed.structuredDrugs;
+  } else if (Array.isArray(parsed.prescriptions) && parsed.prescriptions.length > 0) {
+    structuredDrugs = parsed.prescriptions.map((p: any) => ({
+      drugName: p.drug ?? p.name ?? p.drugName ?? "",
+      dosage: p.dose ?? p.dosage ?? "",
+      frequency: p.frequency ?? "",
+      route: p.route ?? "Oral",
+      duration: p.duration ?? p.days ?? "",
+      notes: p.instructions ?? p.notes ?? "",
+    }));
+  } else if (Array.isArray(parsed.medications) && parsed.medications.length > 0) {
+    structuredDrugs = parsed.medications.map((p: any) => ({
+      drugName: p.drug ?? p.name ?? p.drugName ?? "",
+      dosage: p.dose ?? p.dosage ?? "",
+      frequency: p.frequency ?? "",
+      route: p.route ?? "Oral",
+      duration: p.duration ?? p.days ?? "",
+      notes: p.instructions ?? p.notes ?? "",
+    }));
+  }
+
+  // Differentials
+  let differentialDiagnosis: string[] = [];
+  if (Array.isArray(parsed.differentialDiagnosis) && parsed.differentialDiagnosis.length > 0) {
+    differentialDiagnosis = parsed.differentialDiagnosis.filter((d: any) => typeof d === "string" && d.trim().length > 0);
+  } else if (Array.isArray(parsed.differentials) && parsed.differentials.length > 0) {
+    differentialDiagnosis = parsed.differentials.filter((d: any) => typeof d === "string" && d.trim().length > 0);
+  } else if (Array.isArray(parsed.secondaryDiagnosis) && parsed.secondaryDiagnosis.length > 0) {
+    // Some models return diagnosis list here
+    differentialDiagnosis = parsed.secondaryDiagnosis.filter((d: any) => typeof d === "string" && d.trim().length > 0);
+  } else if (typeof parsed.secondaryDiagnosis === "string" && parsed.secondaryDiagnosis.trim().length > 0 && parsed.secondaryDiagnosis.toLowerCase() !== "none") {
+    // Chat ENHANCED_PROMPT asks for secondaryDiagnosis as string
+    differentialDiagnosis = [parsed.secondaryDiagnosis.trim()];
+  }
+
   return {
-    diagnosis: typeof parsed.diagnosis === "string" ? parsed.diagnosis : "Clinical assessment pending",
-    differentialDiagnosis: Array.isArray(parsed.differentialDiagnosis) ? parsed.differentialDiagnosis : [],
-    treatment: typeof parsed.treatment === "string" ? parsed.treatment : String(parsed.treatment ?? ""),
-    structuredDrugs: Array.isArray(parsed.structuredDrugs) ? parsed.structuredDrugs : [],
-    clinicalNotes: typeof parsed.clinicalNotes === "string" ? parsed.clinicalNotes : (typeof parsed.historyNote === "string" ? parsed.historyNote : ""),
-    followUpInstructions: typeof parsed.followUpInstructions === "string" ? parsed.followUpInstructions : "",
+    diagnosis: diagnosisCandidate ?? "Clinical assessment pending",
+    differentialDiagnosis,
+    treatment: treatmentCandidate ?? "",
+    structuredDrugs: structuredDrugs.filter((d: any) => typeof d.drugName === "string" && d.drugName.trim().length > 0),
+    clinicalNotes: notesCandidate ?? "",
+    followUpInstructions: fuCandidate ?? "",
     isDisclaimer: typeof parsed.isDisclaimer === "boolean" ? parsed.isDisclaimer : true,
   };
 }
@@ -160,13 +303,20 @@ export async function POST(req: Request) {
       protocols,
       structuredOnly,
       prompt: bodyPrompt,
+      countryCode: rawCountryCode,
     } = body as {
       messages?: unknown[];
       context?: string;
       protocols?: KnowledgeChunk[];
       structuredOnly?: boolean;
       prompt?: string;
+      countryCode?: string;
     };
+    const countryCode = (rawCountryCode === 'ZW' || rawCountryCode === 'zw')
+      ? 'ZW' as const
+      : (rawCountryCode === 'GH' || rawCountryCode === 'gh')
+        ? 'GH' as const
+        : undefined;
 
     // Structured-only mode: single prompt, return JSON object
     if (structuredOnly === true && typeof bodyPrompt === "string" && bodyPrompt.trim()) {
@@ -174,7 +324,7 @@ export async function POST(req: Request) {
       let result;
       try {
         result = await askAfia(userQuery, undefined, {
-          systemOverride: STRUCTURED_SYSTEM_PROMPT,
+          systemOverride: buildStructuredPrompt(countryCode),
           context: context || undefined,
           maxOutputTokens: 2048,
         });
@@ -257,14 +407,22 @@ export async function POST(req: Request) {
     console.log('📖 [CHAT API] Protocols from client:', Array.isArray(protocols) ? protocols.length : 0);
 
     // Format GHS protocols from knowledge admin (client-searched IndexedDB)
+    // Pass countryCode so formatter renders the correct authority header.
     const protocolContext = Array.isArray(protocols) && protocols.length > 0
-      ? formatKnowledgeForAI(protocols)
+      ? formatKnowledgeForAI(protocols, countryCode)
       : undefined;
 
     // Call AI with protocol context injected into system prompt
     let result;
     try {
-      result = await askAfia(userQuery, undefined, { context, protocolContext });
+      // Build a jurisdiction-aware override that suppresses Ghana defaults for Zimbabwe clinics.
+      // askAfia ultimately uses AFIA_INSTRUCTION — apply the same override by extending
+      // the effective systemOverride via the caller's options if askAfia supports them.
+      result = await askAfia(userQuery, undefined, {
+        context,
+        protocolContext,
+        systemOverride: buildJurisdictionAwarePrompt(ENHANCED_SYSTEM_PROMPT, countryCode),
+      });
     } catch (retrievalError) {
       console.error('❌ [CHAT API] Knowledge retrieval failed:', retrievalError);
       // Continue with empty protocols rather than crashing

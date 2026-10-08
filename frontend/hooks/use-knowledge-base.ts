@@ -105,12 +105,12 @@ export function useKnowledgeBase(options: UseKnowledgeBaseOptions = {}) {
 
 
   // Search knowledge base for relevant sections (Optimized Worker Search)
-  const searchKnowledge = useCallback(async (query: string, maxResults = 5): Promise<KnowledgeChunk[]> => {
+  const searchKnowledge = useCallback(async (query: string, maxResults = 5, countryCode?: 'GH' | 'ZW'): Promise<KnowledgeChunk[]> => {
     if (!query.trim()) return [];
 
     try {
       // Delegate to worker service
-      const results = await knowledgeSearchService.search(query, maxResults);
+      const results = await knowledgeSearchService.search(query, maxResults, countryCode);
       return results;
     } catch (error) {
       console.error("Worker search failed:", error);
