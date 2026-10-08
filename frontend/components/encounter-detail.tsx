@@ -159,28 +159,71 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
 
   const handleComplete = async () => {
     if (!encounter) return;
-    
-    // Validate that diagnosis and treatment are present before completing
-    const hasDiagnosis = encounter.diagnosis && encounter.diagnosis.trim() !== "";
-    const hasTreatment = encounter.treatment && encounter.treatment.trim() !== "";
-    const hasDrugs = encounter.drugs && encounter.drugs.length > 0;
-    
+
+    // Evidence of diagnosis is acceptable from ANY populated field shape because
+    // the clinical workflow supports multiple representations:
+    //   (a) legacy `diagnosis` string field,
+    //   (b) `unifiedDiagnoses` array (newer structure),
+    //   (c) or `aiDiagnosisData.primaryDiagnosis` applied via AfiaAssistant Sync.
+    // This is the same rule as the encounter-form completion validator.
+    const legacyDiagnosisText = (typeof encounter.diagnosis === "string" ? encounter.diagnosis.trim() : "");
+    const unifiedPrimary = (Array.isArray(encounter.unifiedDiagnoses)
+      ? encounter.unifiedDiagnoses.find(u => u.type === "primary")?.diagnosis?.trim() || ""
+      : "");
+    const aiDiagnosisText = (typeof (encounter as any).aiDiagnosisData?.primaryDiagnosis === "string"
+      ? (encounter as any).aiDiagnosisData.primaryDiagnosis.trim()
+      : "");
+    const hasDiagnosis = legacyDiagnosisText.length > 0
+      || unifiedPrimary.length > 0
+      || aiDiagnosisText.length > 0;
+
+    // Treatment: legacy string OR drugs OR aiDiagnosisData.treatmentPlan
+    const legacyTreatmentText = (typeof encounter.treatment === "string" ? encounter.treatment.trim() : "");
+    const hasDrugs = Array.isArray(encounter.drugs) && encounter.drugs.length > 0;
+    const aiTreatmentText = (typeof (encounter as any).aiDiagnosisData?.treatmentPlan === "string"
+      ? (encounter as any).aiDiagnosisData.treatmentPlan.trim()
+      : "");
+    const hasTreatment = legacyTreatmentText.length > 0 || aiTreatmentText.length > 0;
+
     if (!hasDiagnosis) {
       toast.error("Please add a diagnosis before marking as complete", {
         description: "Use AI Assistant to get diagnosis recommendations"
       });
       return;
     }
-    
+
     if (!hasTreatment && !hasDrugs) {
       toast.error("Please add treatment plan or medications before marking as complete", {
         description: "Use AI Assistant to get treatment recommendations"
       });
       return;
     }
-    
+
+    // Backfill legacy string fields from AI shape if empty.
+    // Patient folder review pages read the diagnosis/treatment strings directly for display.
+    const finalDiagnosis = legacyDiagnosisText || unifiedPrimary || aiDiagnosisText;
+    const finalTreatment = legacyTreatmentText || aiTreatmentText;
+    const updatedDiagnosis = finalDiagnosis;
+    const updatedTreatment = finalTreatment;
+
+    // Ensure unifiedDiagnoses array has at least the primary diagnosis (so
+    // downstream clinical reviewers always see a structured diagnosis source).
+    const baseUnified: any[] = Array.isArray(encounter.unifiedDiagnoses) ? [...encounter.unifiedDiagnoses] : [];
+    if (!baseUnified.some((u) => u.type === "primary")) {
+      baseUnified.unshift({
+        id: `clinician-primary-${encounter.id}`,
+        type: "primary",
+        diagnosis: finalDiagnosis,
+        source: "manual",
+        createdAt: new Date().toISOString(),
+      });
+    }
+
     const updated = { 
       ...encounter, 
+      diagnosis: updatedDiagnosis,
+      treatment: updatedTreatment,
+      unifiedDiagnoses: baseUnified,
       status: "completed" as const, 
       updatedAt: new Date().toISOString(),
       completedAt: new Date().toISOString()

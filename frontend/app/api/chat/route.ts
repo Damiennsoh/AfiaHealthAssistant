@@ -105,15 +105,100 @@ REQUIRED JSON SCHEMA (output this and nothing else):
 
 DISCLAIMER RULE: Set "isDisclaimer" to true if you are relying on general medical knowledge because specific GHS protocols were not found.`;
 
+function firstNonEmptyString(candidates: any[]): string | null {
+  for (const c of candidates) {
+    if (typeof c === "string") {
+      const t = c.trim();
+      if (t.length > 0) return t;
+    } else if (Array.isArray(c)) {
+      // diagnosis/diagnoses array → join with ", "
+      const joined = c
+        .filter((x) => typeof x === "string" && x.trim().length > 0)
+        .map((x) => String(x).trim())
+        .join(", ");
+      if (joined.length > 0) return joined;
+    }
+  }
+  return null;
+}
+
 function validateAndNormalize(parsed: any): any {
   if (!parsed || typeof parsed !== 'object') return null;
+
+  // Primary diagnosis string — accept common aliases that LLMs return under either prompt schema
+  const diagnosisCandidate = firstNonEmptyString([
+    parsed.diagnosis,
+    parsed.primaryDiagnosis,        // ENHANCED_SYSTEM_PROMPT schema (used by chat-mode LLM)
+    parsed.primary_diagnosis,       // REST API snake_case
+    parsed.workingDiagnosis,
+    parsed.diagnoses,               // LLM plural array form
+    parsed.finalDiagnosis,
+  ]);
+
+  // Treatment summary — accept treatmentPlan alias (chat-mode prompt uses this key)
+  const treatmentCandidate = firstNonEmptyString([
+    parsed.treatment,
+    parsed.treatmentPlan,
+    parsed.treatment_plan,
+    parsed.plan,
+    parsed.recommendations,
+  ]);
+
+  // Clinical notes + historyNote alias
+  const notesCandidate = firstNonEmptyString([
+    parsed.clinicalNotes,
+    parsed.historyNote,
+    parsed.assessment,
+    parsed.reasoning,
+  ]);
+
+  const fuCandidate = firstNonEmptyString([parsed.followUpInstructions, parsed.followUp, parsed.follow_up]);
+
+  // Structured drugs — also accept prescriptions/medications arrays as alternate names
+  let structuredDrugs: any[] = [];
+  if (Array.isArray(parsed.structuredDrugs) && parsed.structuredDrugs.length > 0) {
+    structuredDrugs = parsed.structuredDrugs;
+  } else if (Array.isArray(parsed.prescriptions) && parsed.prescriptions.length > 0) {
+    structuredDrugs = parsed.prescriptions.map((p: any) => ({
+      drugName: p.drug ?? p.name ?? p.drugName ?? "",
+      dosage: p.dose ?? p.dosage ?? "",
+      frequency: p.frequency ?? "",
+      route: p.route ?? "Oral",
+      duration: p.duration ?? p.days ?? "",
+      notes: p.instructions ?? p.notes ?? "",
+    }));
+  } else if (Array.isArray(parsed.medications) && parsed.medications.length > 0) {
+    structuredDrugs = parsed.medications.map((p: any) => ({
+      drugName: p.drug ?? p.name ?? p.drugName ?? "",
+      dosage: p.dose ?? p.dosage ?? "",
+      frequency: p.frequency ?? "",
+      route: p.route ?? "Oral",
+      duration: p.duration ?? p.days ?? "",
+      notes: p.instructions ?? p.notes ?? "",
+    }));
+  }
+
+  // Differentials
+  let differentialDiagnosis: string[] = [];
+  if (Array.isArray(parsed.differentialDiagnosis) && parsed.differentialDiagnosis.length > 0) {
+    differentialDiagnosis = parsed.differentialDiagnosis.filter((d: any) => typeof d === "string" && d.trim().length > 0);
+  } else if (Array.isArray(parsed.differentials) && parsed.differentials.length > 0) {
+    differentialDiagnosis = parsed.differentials.filter((d: any) => typeof d === "string" && d.trim().length > 0);
+  } else if (Array.isArray(parsed.secondaryDiagnosis) && parsed.secondaryDiagnosis.length > 0) {
+    // Some models return diagnosis list here
+    differentialDiagnosis = parsed.secondaryDiagnosis.filter((d: any) => typeof d === "string" && d.trim().length > 0);
+  } else if (typeof parsed.secondaryDiagnosis === "string" && parsed.secondaryDiagnosis.trim().length > 0 && parsed.secondaryDiagnosis.toLowerCase() !== "none") {
+    // Chat ENHANCED_PROMPT asks for secondaryDiagnosis as string
+    differentialDiagnosis = [parsed.secondaryDiagnosis.trim()];
+  }
+
   return {
-    diagnosis: typeof parsed.diagnosis === "string" ? parsed.diagnosis : "Clinical assessment pending",
-    differentialDiagnosis: Array.isArray(parsed.differentialDiagnosis) ? parsed.differentialDiagnosis : [],
-    treatment: typeof parsed.treatment === "string" ? parsed.treatment : String(parsed.treatment ?? ""),
-    structuredDrugs: Array.isArray(parsed.structuredDrugs) ? parsed.structuredDrugs : [],
-    clinicalNotes: typeof parsed.clinicalNotes === "string" ? parsed.clinicalNotes : (typeof parsed.historyNote === "string" ? parsed.historyNote : ""),
-    followUpInstructions: typeof parsed.followUpInstructions === "string" ? parsed.followUpInstructions : "",
+    diagnosis: diagnosisCandidate ?? "Clinical assessment pending",
+    differentialDiagnosis,
+    treatment: treatmentCandidate ?? "",
+    structuredDrugs: structuredDrugs.filter((d: any) => typeof d.drugName === "string" && d.drugName.trim().length > 0),
+    clinicalNotes: notesCandidate ?? "",
+    followUpInstructions: fuCandidate ?? "",
     isDisclaimer: typeof parsed.isDisclaimer === "boolean" ? parsed.isDisclaimer : true,
   };
 }
