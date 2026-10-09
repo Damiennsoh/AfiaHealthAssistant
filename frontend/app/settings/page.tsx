@@ -22,6 +22,8 @@ import { auditDB, clearClinicalLocalData, getLegacyCacheSummary, migrateLegacyCa
 import { syncService } from "@/lib/afia-sync"
 import { OfflineSyncManager } from "@/lib/sync-manager"
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 export default function SettingsPage() {
   const { user, refreshUser, logout } = useAuth()
   const { syncToCloud } = useSync()
@@ -43,10 +45,37 @@ export default function SettingsPage() {
   const [legacyPassword, setLegacyPassword] = useState("")
   const [legacyConfirmation, setLegacyConfirmation] = useState("")
   const [importingLegacy, setImportingLegacy] = useState(false)
+  const [facilityDisplayName, setFacilityDisplayName] = useState("")
 
   useEffect(() => {
     if (user?.id) void refreshUser()
   }, [user?.id, refreshUser])
+
+  useEffect(() => {
+    const clinicName = typeof user?.clinic_name === "string" ? user.clinic_name.trim() : ""
+    setFacilityDisplayName(clinicName)
+
+    if (user?.role === "super_admin" || !user?.clinic_id || !UUID_PATTERN.test(clinicName)) return
+
+    let cancelled = false
+    void afiaAPI.getClinic(String(user.clinic_id)).then((response) => {
+      if (cancelled) return
+      const clinic = response.data
+      const name = typeof clinic?.name === "string" ? clinic.name.trim() : ""
+      const code = typeof clinic?.code === "string" ? clinic.code.trim() : ""
+      setFacilityDisplayName(
+        name && !UUID_PATTERN.test(name)
+          ? name
+          : code && !UUID_PATTERN.test(code)
+            ? code
+            : "Facility name unavailable"
+      )
+    }).catch(() => {
+      if (!cancelled) setFacilityDisplayName("Facility name unavailable")
+    })
+
+    return () => { cancelled = true }
+  }, [user?.clinic_id, user?.clinic_name, user?.role])
 
   useEffect(() => {
     if (user?.role !== "clinic_admin") return
@@ -220,7 +249,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Staff ID</Label>
-                  <Input value={user.staff_id || "Not assigned"} disabled className="bg-slate-50" />
+                  <Input value={user.staff_id && user.staff_id !== user.id ? user.staff_id : "Not assigned"} disabled className="bg-slate-50" />
                 </div>
                 <div className="space-y-2">
                   <Label>Role</Label>
@@ -229,7 +258,7 @@ export default function SettingsPage() {
                 <div className="space-y-2">
                   <Label>{user.role === "super_admin" ? "Access Scope" : "Facility"}</Label>
                   <Input
-                    value={user.role === "super_admin" ? "Global — all facilities" : (user.clinic_name || "Facility unavailable")}
+                    value={user.role === "super_admin" ? "Global — all facilities" : (facilityDisplayName || "Facility unavailable")}
                     disabled
                     className="bg-slate-50"
                   />
