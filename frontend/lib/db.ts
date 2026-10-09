@@ -1,14 +1,20 @@
 // IndexedDB database layer for Afia Health Assistant
 // Uses raw IndexedDB for full control over stores and indexes
-import { getActiveKey, encryptData, decryptData } from './crypto';
-import { getActiveDB } from './guest-mode';
+import { generateDeviceCacheKey, getActiveKey, getKey, setActiveKey, encryptData, decryptData } from './crypto';
+import { getActiveDB, PROD_DB_NAME } from './guest-mode';
 
 // DB_NAME is resolved dynamically at call time so that the guest demo
 // account transparently uses 'afia-health-guest-db' while real clinic
 // staff always use 'afia-health-db'. Never hardcode this constant in
 // openDB() calls — always use getActiveDB() instead.
 const DB_NAME = "afia-health-db"; // fallback — openDB() uses getActiveDB() at runtime
-export const DB_VERSION = 6; // 5→6 adds audit_logs store for tamper-evident append-only action trail
+export const DB_VERSION = 7; // 6→7 adds a persisted device cache-encryption key
+const deviceCacheKeys = new Map<string, CryptoKey>();
+
+export function clearActiveCacheKey(): void {
+  deviceCacheKeys.delete(getActiveDB());
+  setActiveKey(null);
+}
 
 export interface Patient {
   id: string;
@@ -262,6 +268,12 @@ function openDB(): Promise<IDBDatabase> {
   const activeName = getActiveDB();
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(activeName, DB_VERSION);
+    let wasBlocked = false;
+
+    request.onblocked = () => {
+      wasBlocked = true;
+      reject(new Error('Close other Afia Health Assistant tabs on this device, then retry the local cache update.'));
+    };
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
@@ -328,9 +340,16 @@ function openDB(): Promise<IDBDatabase> {
         auditStore.createIndex("userId", "userId", { unique: false });
         auditStore.createIndex("resourceType_resourceId", ["resourceType", "resourceId"], { unique: false, multiEntry: false } as any);
       }
+
+      if (!db.objectStoreNames.contains("device_keys")) {
+        db.createObjectStore("device_keys", { keyPath: "id" });
+      }
     };
 
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      if (wasBlocked) request.result.close();
+      else resolve(request.result);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -1105,17 +1124,254 @@ export const dbCleanup = {
 
 export async function clearClinicalLocalData(): Promise<void> {
   const db = await openDB();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['patients','encounters','aiRequests'],'readwrite');
-    tx.objectStore('patients').clear();
-    tx.objectStore('encounters').clear();
-    tx.objectStore('aiRequests').clear();
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error as any);
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const stores = ['patients', 'encounters', 'aiRequests', 'uploads', 'users', 'audit_logs', 'device_keys']
+        .filter((storeName) => db.objectStoreNames.contains(storeName));
+      const tx = db.transaction(stores, 'readwrite');
+      for (const storeName of stores) tx.objectStore(storeName).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error as any);
+      tx.onabort = () => reject(tx.error || new Error('Local reset transaction was aborted.'));
+    });
+  } finally {
+    db.close();
+  }
   notify('patients');
   notify('encounters');
   notify('aiRequests');
+  notify('uploads');
+  notify('users');
+  notify('audit_logs');
+  clearActiveCacheKey();
+}
+
+/**
+ * Unlock or initialize the facility/device cache key. Passwords are used only
+ * once to migrate legacy password-encrypted rows; routine access uses a random
+ * non-exportable CryptoKey persisted in this facility's IndexedDB database.
+ */
+export async function initializeActiveCacheKey(legacyPassword?: string): Promise<void> {
+  const activeDatabaseName = getActiveDB();
+  const db = await openDB();
+  const stores = ['patients', 'encounters'] as const;
+  const originalRecords: Record<string, any[]> = {};
+  let cacheKey: CryptoKey | undefined;
+
+  try {
+    const readTx = db.transaction([...stores, 'device_keys'], 'readonly');
+    const keyRequest = readTx.objectStore('device_keys').get('facility-cache-key');
+    const recordRequests = stores.map((storeName) => {
+      const request = readTx.objectStore(storeName).getAll();
+      return new Promise<any[]>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      });
+    });
+    const storedKey = deviceCacheKeys.get(activeDatabaseName) || await new Promise<CryptoKey | undefined>((resolve, reject) => {
+      keyRequest.onsuccess = () => resolve(keyRequest.result?.key as CryptoKey | undefined);
+      keyRequest.onerror = () => reject(keyRequest.error);
+    });
+    const records = await Promise.all(recordRequests);
+    originalRecords.patients = records[0];
+    originalRecords.encounters = records[1];
+
+    const generatedCacheKey = storedKey ? null : await generateDeviceCacheKey();
+    cacheKey = storedKey || generatedCacheKey!;
+    const passwordLegacyKey = legacyPassword ? await getKey(legacyPassword) : null;
+    const migratedRecords: Record<string, any[]> = { patients: [], encounters: [] };
+
+    for (const [index, storeName] of stores.entries()) {
+      for (const rawRecord of originalRecords[storeName]) {
+        let record = rawRecord;
+        if (rawRecord.__encrypted_payload) {
+          let plaintext: string | null = null;
+          for (const candidateKey of [storedKey, passwordLegacyKey].filter(Boolean) as CryptoKey[]) {
+            try {
+              plaintext = await decryptData(rawRecord.__encrypted_payload, candidateKey);
+              break;
+            } catch {
+              // Try the legacy password-derived key after a failed cache-key decrypt.
+            }
+          }
+          if (!plaintext) {
+            throw new Error('Could not unlock this device’s existing clinical cache. Keep the current password and contact support before clearing local data.');
+          }
+          record = { ...JSON.parse(plaintext), ...rawRecord };
+          delete record.__encrypted_payload;
+        }
+
+        const encryptedPayload = await encryptData(JSON.stringify(record), cacheKey);
+        migratedRecords[storeName].push(index === 0 ? {
+          id: record.id,
+          folderNumber: record.folderNumber,
+          nhisNumber: record.nhisNumber,
+          name: record.name,
+          locality: record.locality,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          deleted: record.deleted,
+          isDeleted: record.isDeleted,
+          __encrypted_payload: encryptedPayload,
+        } : {
+          id: record.id,
+          patientId: record.patientId,
+          date: record.date,
+          status: record.status,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          deleted: record.deleted,
+          isDeleted: record.isDeleted,
+          __encrypted_payload: encryptedPayload,
+        });
+      }
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([...stores, 'device_keys'], 'readwrite');
+      for (const storeName of stores) {
+        const store = tx.objectStore(storeName);
+        store.clear();
+        for (const record of migratedRecords[storeName]) store.put(record);
+      }
+      if (generatedCacheKey) tx.objectStore('device_keys').put({ id: 'facility-cache-key', key: generatedCacheKey });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Cache-key initialization was aborted.'));
+    });
+    deviceCacheKeys.set(activeDatabaseName, cacheKey);
+    setActiveKey(cacheKey);
+  } finally {
+    db.close();
+  }
+
+  notify('patients');
+  notify('encounters');
+}
+
+export interface LegacyCacheSummary {
+  patients: number;
+  encounters: number;
+}
+
+async function openExistingLegacyDatabase(): Promise<IDBDatabase | null> {
+  if (typeof indexedDB.databases === 'function') {
+    const knownDatabases = await indexedDB.databases();
+    if (!knownDatabases.some((database) => database.name === PROD_DB_NAME)) return null;
+  }
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(PROD_DB_NAME);
+    let createdByProbe = false;
+    request.onupgradeneeded = () => {
+      createdByProbe = true;
+      request.transaction?.abort();
+      resolve(null);
+    };
+    request.onsuccess = () => {
+      if (createdByProbe) request.result.close();
+      else resolve(request.result);
+    };
+    request.onerror = () => {
+      if (createdByProbe && request.error?.name === 'AbortError') resolve(null);
+      else reject(request.error);
+    };
+  });
+}
+
+async function readLegacyClinicalRows(db: IDBDatabase): Promise<{ patients: any[]; encounters: any[] }> {
+  const rows: { patients: any[]; encounters: any[] } = { patients: [], encounters: [] };
+  const availableStores = ['patients', 'encounters'].filter((name) => db.objectStoreNames.contains(name));
+  if (!availableStores.length) return rows;
+  await Promise.all(availableStores.map((name) => new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(name, 'readonly');
+    const request = tx.objectStore(name).getAll();
+    request.onsuccess = () => {
+      rows[name as 'patients' | 'encounters'] = request.result || [];
+      resolve();
+    };
+    request.onerror = () => reject(request.error);
+  })));
+  return rows;
+}
+
+/** Inspect the old shared cache without creating or modifying it. */
+export async function getLegacyCacheSummary(): Promise<LegacyCacheSummary> {
+  if (getActiveDB() === PROD_DB_NAME) return { patients: 0, encounters: 0 };
+  const db = await openExistingLegacyDatabase();
+  if (!db) return { patients: 0, encounters: 0 };
+  try {
+    const rows = await readLegacyClinicalRows(db);
+    return { patients: rows.patients.length, encounters: rows.encounters.length };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Copy legacy shared-cache records into the currently active facility cache.
+ * Requires facility-admin confirmation in the UI. The source cache is retained
+ * so a partial failure or a mistaken choice cannot destroy the original data.
+ */
+export async function migrateLegacyCacheToActiveClinic(password: string): Promise<LegacyCacheSummary> {
+  if (getActiveDB() === PROD_DB_NAME) throw new Error('The active database is not a clinic-scoped cache.');
+  const sourceDb = await openExistingLegacyDatabase();
+  if (!sourceDb) return { patients: 0, encounters: 0 };
+
+  try {
+    const legacyRows = await readLegacyClinicalRows(sourceDb);
+    const summary = { patients: legacyRows.patients.length, encounters: legacyRows.encounters.length };
+    if (!summary.patients && !summary.encounters) return summary;
+
+    const targetPatients = await patientDB.getAll(true);
+    const targetEncounters = await encounterDB.getAll(true);
+
+    const legacyKey = await getKey(password);
+    const decryptLegacyRows = async <T,>(storeName: 'patients' | 'encounters', rows: any[]): Promise<T[]> => {
+      const decrypted: T[] = [];
+      for (const raw of rows) {
+        let item: any = raw;
+        if (raw.__encrypted_payload) {
+          try {
+            const payload = JSON.parse(await decryptData(raw.__encrypted_payload, legacyKey));
+            item = { ...payload, ...raw };
+            delete item.__encrypted_payload;
+          } catch {
+            throw new Error('The current password could not unlock the old local cache. The source remains unchanged.');
+          }
+        }
+        decrypted.push(await processItemFromDB<T>(storeName, item));
+      }
+      return decrypted;
+    };
+
+    const patients = await decryptLegacyRows<Patient>('patients', legacyRows.patients);
+    const encounters = await decryptLegacyRows<Encounter>('encounters', legacyRows.encounters);
+    const targetPatientById = new Map(targetPatients.map((patient) => [patient.id, patient]));
+    const targetEncounterById = new Map(targetEncounters.map((encounter) => [encounter.id, encounter]));
+    for (const patient of patients) {
+      const existing = targetPatientById.get(patient.id);
+      if (existing) {
+        if (JSON.stringify(existing) !== JSON.stringify(patient)) {
+          throw new Error('A target patient record conflicts with the legacy cache. No existing facility data was overwritten.');
+        }
+        continue;
+      }
+      await patientDB.save(patient);
+    }
+    for (const encounter of encounters) {
+      const existing = targetEncounterById.get(encounter.id);
+      if (existing) {
+        if (JSON.stringify(existing) !== JSON.stringify(encounter)) {
+          throw new Error('A target encounter conflicts with the legacy cache. No existing facility data was overwritten.');
+        }
+        continue;
+      }
+      await encounterDB.save(encounter);
+    }
+    return summary;
+  } finally {
+    sourceDb.close();
+  }
 }
 
 /**

@@ -62,11 +62,16 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Auto-sync every 30 seconds when online — DISABLED for guest demo sessions
   useEffect(() => {
-    if (!user) return;
-    if (isGuestMode) {
-      console.log('[Sync] Guest mode — auto-sync disabled. Data stays in sandbox DB only.');
+    if (!user || isGuestMode || user.role === 'super_admin' || !user.clinic_id) {
+      queuedPatientIds.current.clear();
+      queuedEncounterIds.current.clear();
+      syncService.clearClinicScope();
+      syncService.stopAutoSync();
       return;
     }
+    queuedPatientIds.current.clear();
+    queuedEncounterIds.current.clear();
+    syncService.setClinicScope(String(user.clinic_id));
     syncService.startAutoSync(30000);
     return () => syncService.stopAutoSync();
   }, [user, isGuestMode]);
@@ -79,9 +84,15 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!user) return;
     // 🪣 GUEST ISOLATION: never push guest sandbox data to the backend
     if (isGuestMode) {
+      syncService.clearClinicScope();
       console.log('[Sync] Guest mode — syncToCloud skipped. Sandbox data is local-only.');
       return;
     }
+    if (user.role === 'super_admin' || !user.clinic_id) {
+      syncService.clearClinicScope();
+      return;
+    }
+    syncService.setClinicScope(String(user.clinic_id));
     if (!isOnline) {
       console.log('[Sync] Offline — changes queued, will push when online');
       return;

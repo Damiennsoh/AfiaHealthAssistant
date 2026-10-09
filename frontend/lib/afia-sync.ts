@@ -27,6 +27,9 @@ interface SyncQueue {
 
 class SyncService {
   private queue: SyncQueue;
+  private queueStorageKey = 'afia_sync_queue:unassigned';
+  private deviceStorageKey = 'afia_device_id:unassigned';
+  private clinicScopeReady = false;
   private syncInterval: number = 30000; // 30 seconds
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private isOnline: boolean = true;
@@ -54,6 +57,27 @@ class SyncService {
     return this.queue.deviceId;
   }
 
+  /** Switch offline mutation queues when the authenticated facility changes. */
+  setClinicScope(clinicId: string): void {
+    const normalizedClinicId = clinicId.trim().toLowerCase();
+    if (!normalizedClinicId) throw new Error('Clinic scope is required for clinical sync.');
+    const nextQueueKey = `afia_sync_queue:${normalizedClinicId}`;
+    this.clinicScopeReady = true;
+    if (nextQueueKey === this.queueStorageKey) return;
+
+    this.queueStorageKey = nextQueueKey;
+    this.deviceStorageKey = `afia_device_id:${normalizedClinicId}`;
+    this.queue = this.loadQueue();
+    this.generateDeviceId();
+  }
+
+  clearClinicScope(): void {
+    this.clinicScopeReady = false;
+    this.queueStorageKey = 'afia_sync_queue:unassigned';
+    this.deviceStorageKey = 'afia_device_id:unassigned';
+    this.queue = { changes: [], lastSync: null, deviceId: '' };
+  }
+
   /**
    * Load sync queue from localStorage
    */
@@ -63,7 +87,7 @@ class SyncService {
     }
 
     try {
-      const stored = localStorage.getItem('afia_sync_queue');
+      const stored = localStorage.getItem(this.queueStorageKey);
       if (stored) {
         return JSON.parse(stored);
       }
@@ -81,7 +105,7 @@ class SyncService {
     if (typeof window === 'undefined') return;
 
     try {
-      localStorage.setItem('afia_sync_queue', JSON.stringify(this.queue));
+      localStorage.setItem(this.queueStorageKey, JSON.stringify(this.queue));
     } catch (e) {
       console.error('Failed to save sync queue:', e);
     }
@@ -246,8 +270,8 @@ class SyncService {
    * Perform sync with server
    */
   async sync(): Promise<{ synced: number; failed: number; conflicts: number }> {
-    if (!this.isOnline) {
-      console.log('Cannot sync: offline');
+    if (!this.clinicScopeReady || !this.isOnline) {
+      console.log('Cannot sync: clinic scope is not set or device is offline');
       return { synced: 0, failed: 0, conflicts: 0 };
     }
 
@@ -333,11 +357,23 @@ class SyncService {
     return { synced, failed, conflicts };
   }
 
+  getLegacyUnscopedPendingCount(): number {
+    if (typeof window === 'undefined') return 0;
+    try {
+      const legacyQueue = JSON.parse(localStorage.getItem('afia_sync_queue') || '{"changes":[]}');
+      return Array.isArray(legacyQueue.changes)
+        ? legacyQueue.changes.filter((change: SyncChange) => change.status !== 'synced').length
+        : 0;
+    } catch {
+      return 1;
+    }
+  }
+
   /**
    * Pull pending changes from server (for multi-device sync)
    */
   async pull(): Promise<SyncChange[]> {
-    if (!this.isOnline) return [];
+    if (!this.clinicScopeReady || !this.isOnline) return [];
 
     try {
       const lastSyncAt = this.queue.lastSync ? new Date(this.queue.lastSync).toISOString() : null;
