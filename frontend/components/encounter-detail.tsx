@@ -56,6 +56,7 @@ import { EditEncounterModal } from "./edit-encounter-modal";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AfiaAuthContext";
+import { afiaAPI } from "@/lib/afia-api";
 
 // Vital Item Component - Mobile-first card design
 const VitalItem = ({ icon: Icon, label, value, unit, color }: any) => (
@@ -88,6 +89,15 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
   const [activeTab, setActiveTab] = useState("details");
   const [showEditModal, setShowEditModal] = useState(false);
 
+  const logEncounterUpdate = async (resourceId: string) => {
+    const auditRecorded = await afiaAPI.recordAuditEvent({
+      action: "encounter_updated",
+      resource_type: "encounter",
+      resource_id: resourceId,
+    });
+    if (!auditRecorded) toast.warning("Encounter updated, but the audit event could not be sent to the facility server.");
+  };
+
   // Drug and lab results handlers
   const handleAddDrug = async (drug: DrugAdministration) => {
     if (!encounter) return;
@@ -99,6 +109,7 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
     };
     
     await encounterDB.save(updatedEncounter);
+    await logEncounterUpdate(encounter.id);
     setEncounter(updatedEncounter);
     toast.success("Medication added", {
       description: `${drug.drugName} ${drug.dosage} has been recorded`,
@@ -117,6 +128,7 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
     };
     
     await encounterDB.save(updatedEncounter);
+    await logEncounterUpdate(encounter.id);
     setEncounter(updatedEncounter);
     toast.success("Medication removed", {
       description: drugToRemove ? `${drugToRemove.drugName} has been removed` : "Medication removed",
@@ -133,6 +145,7 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
     };
     
     await encounterDB.save(updatedEncounter);
+    await logEncounterUpdate(encounter.id);
     setEncounter(updatedEncounter);
     toast.success("Lab result added", {
       description: `${result.testType}: ${result.result} ${result.unit}`,
@@ -151,6 +164,7 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
     };
     
     await encounterDB.save(updatedEncounter);
+    await logEncounterUpdate(encounter.id);
     setEncounter(updatedEncounter);
     toast.success("Lab result removed", {
       description: resultToRemove ? `${resultToRemove.testType} has been removed` : "Lab result removed",
@@ -230,6 +244,12 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
     };
     
     await encounterDB.save(updated);
+    const auditRecorded = await afiaAPI.recordAuditEvent({
+      action: "encounter_completed",
+      resource_type: "encounter",
+      resource_id: encounter.id,
+    });
+    if (!auditRecorded) toast.warning("Encounter completed, but the audit event could not be sent to the facility server.");
     setEncounter(updated);
     
     toast.success("Encounter marked as complete", {
@@ -249,6 +269,12 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
   const handleDelete = async () => {
     if (!encounter) return;
     await encounterDB.softDelete(encounterId, user?.id);
+    const auditRecorded = await afiaAPI.recordAuditEvent({
+      action: "encounter_deleted",
+      resource_type: "encounter",
+      resource_id: encounterId,
+    });
+    if (!auditRecorded) toast.warning("Encounter deactivated, but the audit event could not be sent to the facility server.");
     toast.success("Encounter deleted");
     router.push("/encounters");
   };
@@ -259,6 +285,12 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
       const currentEnc = await encounterDB.getById(encounterId);
       if (currentEnc) {
         setEncounter(currentEnc);
+        const auditRecorded = await afiaAPI.recordAuditEvent({
+          action: "encounter_read",
+          resource_type: "encounter",
+          resource_id: encounterId,
+        });
+        if (!auditRecorded) console.warn("Encounter access was not sent to the facility audit server.");
         const [pat, allEncounters] = await Promise.all([
           patientDB.getById(currentEnc.patientId),
           encounterDB.getAll()
@@ -413,6 +445,7 @@ export function EncounterDetail({ encounterId }: { encounterId: string }) {
         // Save updated encounter
         if (appliedCount > 0) {
           await encounterDB.save(updatedEncounter);
+          await logEncounterUpdate(encounterId);
           setEncounter(updatedEncounter);
           
           toast.success('AI recommendations applied!', {

@@ -24,13 +24,11 @@ import {
 
 import CryptoJS from "crypto-js";
 import { useAuth } from "@/contexts/AfiaAuthContext";
+import { afiaAPI } from "@/lib/afia-api";
 import { 
-  patientDB, encounterDB, aiRequestDB, uploadDB, userDB, metadataDB 
+  DB_VERSION, patientDB, encounterDB, aiRequestDB, uploadDB, userDB, metadataDB
 } from "@/lib/db";
-
-// Correct database configuration - single database with multiple stores
-const DB_NAME = "afia-health-db";
-const DB_VERSION = 4;
+import { getActiveDB } from "@/lib/guest-mode";
 
 interface BackupData {
   app: string;
@@ -171,7 +169,17 @@ export default function DataUtility() {
       link.download = `AFIA_BACKUP_${date}_${patientCount}p_${encounterCount}e${useEncryption ? '_SECURE' : ''}.afia`;
       link.click();
       URL.revokeObjectURL(url);
-      setStatus({ msg: `Backup saved: ${patientCount} patients, ${encounterCount} encounters`, type: 'success' });
+      const auditRecorded = await afiaAPI.recordAuditEvent({
+        action: "backup_created",
+        resource_type: "backup",
+        details: { patient_count: patientCount, encounter_count: encounterCount, encrypted: useEncryption },
+      });
+      setStatus({
+        msg: auditRecorded
+          ? `Backup saved: ${patientCount} patients, ${encounterCount} encounters`
+          : `Backup saved, but its audit event could not be sent to the facility server`,
+        type: auditRecorded ? 'success' : 'error',
+      });
     } catch (err) {
       console.error(err);
       setStatus({ msg: "Could not save data", type: 'error' });
@@ -236,7 +244,7 @@ export default function DataUtility() {
         setStatus({ msg: "Restoring database...", type: 'info' });
 
         // Open database and restore each store
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        const request = indexedDB.open(getActiveDB(), DB_VERSION);
         request.onsuccess = () => {
           const db = request.result;
           
@@ -277,8 +285,19 @@ export default function DataUtility() {
             restoreStore("uploads", backup.payload.uploads),
             restoreStore("metadata", backup.payload.metadata),
             restoreStore("users", backup.payload.users),
-          ]).then(() => {
-            setStatus({ msg: "Data restored successfully!", type: 'success' });
+          ]).then(async () => {
+            const auditRecorded = await afiaAPI.recordAuditEvent({
+              action: "backup_restored",
+              resource_type: "backup",
+              details: {
+                patient_count: backup.payload.patients?.length || 0,
+                encounter_count: backup.payload.encounters?.length || 0,
+              },
+            });
+            setStatus({
+              msg: auditRecorded ? "Data restored successfully!" : "Data restored, but its audit event could not be sent to the facility server.",
+              type: auditRecorded ? 'success' : 'error',
+            });
             generateQuickStats(selectedDate);
             setTimeout(() => window.location.reload(), 1500);
           });
@@ -370,7 +389,17 @@ export default function DataUtility() {
       link.download = `GHS_Monthly_Report_${new Date().getMonth() + 1}_${new Date().getFullYear()}.csv`;
       link.click();
       URL.revokeObjectURL(url);
-      setStatus({ msg: `Report downloaded: ${patients.length} patients`, type: 'success' });
+      const auditRecorded = await afiaAPI.recordAuditEvent({
+        action: "report_exported",
+        resource_type: "report",
+        details: { report_type: "GHS monthly report", record_count: patients.length },
+      });
+      setStatus({
+        msg: auditRecorded
+          ? `Report downloaded: ${patients.length} patients`
+          : "Report downloaded, but its audit event could not be sent to the facility server.",
+        type: auditRecorded ? 'success' : 'error',
+      });
     } catch (e) { 
       const errorMsg = e instanceof Error ? e.message : "Export failed";
       setStatus({ msg: errorMsg, type: 'error' }); 

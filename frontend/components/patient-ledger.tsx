@@ -37,6 +37,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { patientDB, generateId, formatNHIS, generateFolderNumber } from "@/lib/db";
+import { afiaAPI } from "@/lib/afia-api";
 import { LocalitySelector } from "./health/LocalitySelector";
 import type { Patient } from "@/lib/db";
 import { PatientCard, PatientCardSkeleton } from "@/components/patient-card";
@@ -259,9 +260,15 @@ export function PatientLedger() {
 
     try {
       await patientDB.save(patient);
+      const auditRecorded = await afiaAPI.recordAuditEvent({
+        action: "patient_created",
+        resource_type: "patient",
+        resource_id: patient.id,
+      });
       toast.success("Patient registered successfully", {
         description: `${patient.name} has been added to the OPD ledger`,
       });
+      if (!auditRecorded) toast.warning("Patient saved, but the audit event could not be sent to the facility server.");
       setIsFormOpen(false);
       setFormData({
         name: "",

@@ -56,6 +56,14 @@ class AuditAction(str, PyEnum):
     CLINIC_DELETED = "clinic_deleted"
     STAFF_ADDED = "staff_added"
     STAFF_DELETED = "staff_deleted"
+    STAFF_DEACTIVATED = "staff_deactivated"
+    PATIENT_DELETED = "patient_deleted"
+    ENCOUNTER_COMPLETED = "encounter_completed"
+    ENCOUNTER_DELETED = "encounter_deleted"
+    BACKUP_CREATED = "backup_created"
+    BACKUP_RESTORED = "backup_restored"
+    REPORT_EXPORTED = "report_exported"
+    PATIENT_REFERRED = "patient_referred"
 
 
 class AuditLog(BaseModel):

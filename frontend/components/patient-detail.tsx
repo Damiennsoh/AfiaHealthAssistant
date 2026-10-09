@@ -36,6 +36,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { patientDB, encounterDB } from "@/lib/db";
+import { afiaAPI } from "@/lib/afia-api";
 import type { Patient, Encounter } from "@/lib/db";
 import { toast } from "sonner";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -57,6 +58,14 @@ export function PatientDetail({ patientId }: { patientId: string }) {
         encounterDB.getByPatient(patientId),
       ]);
       setPatient(p);
+      if (p) {
+        const auditRecorded = await afiaAPI.recordAuditEvent({
+          action: "patient_read",
+          resource_type: "patient",
+          resource_id: patientId,
+        });
+        if (!auditRecorded) console.warn("Patient chart access was not sent to the facility audit server.");
+      }
       setEncounters(
         (enc || []).sort(
           (a, b) =>
@@ -78,6 +87,12 @@ export function PatientDetail({ patientId }: { patientId: string }) {
   const handleDelete = async () => {
     try {
       await patientDB.softDelete(patientId, user?.id);
+      const auditRecorded = await afiaAPI.recordAuditEvent({
+        action: "patient_deleted",
+        resource_type: "patient",
+        resource_id: patientId,
+      });
+      if (!auditRecorded) toast.warning("Patient deactivated, but the audit event could not be sent to the facility server.");
       toast.success("Patient record deleted");
       router.push("/patients");
     } catch {

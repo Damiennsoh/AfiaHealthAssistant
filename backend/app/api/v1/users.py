@@ -53,7 +53,7 @@ async def create_user(
     # Log user creation with AuditService
     audit_service = AuditService(db)
     await audit_service.log(
-        action=AuditAction.USER_CREATED,
+        action=AuditAction.STAFF_ADDED,
         user=current_user,
         clinic=clinic,
         resource_type="user",
@@ -162,7 +162,7 @@ async def delete_user(
     # Log user deletion with AuditService
     audit_service = AuditService(db)
     await audit_service.log(
-        action=AuditAction.USER_DELETED,
+        action=AuditAction.STAFF_DEACTIVATED,
         user=current_user,
         clinic=clinic,
         resource_type="user",

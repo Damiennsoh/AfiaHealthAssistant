@@ -75,7 +75,7 @@ const navItems = [
     label: "Audit Logs",
     icon: FileText,
     description: "Activity tracking",
-    roles: ["super_admin", "clinic_admin"], // Only show for these roles
+    roles: ["clinic_admin"], // Facility audit logs are clinic-admin-only
   },
 ];
 

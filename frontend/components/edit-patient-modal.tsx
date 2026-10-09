@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { patientDB, type Patient } from "@/lib/db";
+import { afiaAPI } from "@/lib/afia-api";
 import { toast } from "sonner";
 import { AdminAuthModal } from "./admin-auth-modal";
 import { useAuth } from "@/contexts/AfiaAuthContext";
@@ -107,6 +108,12 @@ export function EditPatientModal({
       };
 
       await patientDB.save(updatedPatient);
+      const auditRecorded = await afiaAPI.recordAuditEvent({
+        action: "patient_updated",
+        resource_type: "patient",
+        resource_id: updatedPatient.id,
+      });
+      if (!auditRecorded) toast.warning("Patient updated, but the audit event could not be sent to the facility server.");
       
       // Proactively trigger cloud sync if online
       if (syncToCloud) {
