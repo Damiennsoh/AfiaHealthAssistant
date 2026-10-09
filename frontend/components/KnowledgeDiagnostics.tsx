@@ -19,11 +19,14 @@ import { cn } from "@/lib/utils";
 
 // Config from your system
 import { knowledgeDB } from "@/lib/knowledge-base";
+import { loadPrecomputedKnowledge } from "@/lib/knowledge-loader";
 
 export default function KnowledgeDiagnostics() {
   const [dbStats, setDbStats] = useState({ total: 0, embedded: 0, status: 'loading' });
   const [logs, setLogs] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [isLoadingBundle, setIsLoadingBundle] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
 
   const addLog = useCallback((msg: string) => {
@@ -49,21 +52,71 @@ export default function KnowledgeDiagnostics() {
     }
   }, [addLog]);
 
-  const testModelLoading = async () => {
-    setIsRunning(true);
-    addLog("Attempting to initialize Transformers.js...");
+  const loadBundledKnowledge = async () => {
+    setIsLoadingBundle(true);
+    addLog("Loading the precomputed knowledge bundle into local IndexedDB...");
     try {
-      // This mimics the check for the embedding engine
-      const start = Date.now();
-      addLog("Checking for @xenova/transformers or similar...");
-      
-      // Simulate model check
-      setTimeout(() => {
-        addLog(`Model init check took ${Date.now() - start}ms`);
-        setIsRunning(false);
-      },1000);
-    } catch (e) {
-      addLog("FAILURE: Model could not be initialized.");
+      const result = await loadPrecomputedKnowledge((percent) => {
+        addLog(`Bundle import progress: ${percent}%`);
+      });
+      if (!result.success) throw new Error(result.error || "Bundle import failed");
+      addLog(`Saved ${result.count} chunks with precomputed vectors to IndexedDB.`);
+      await checkDatabase();
+    } catch (error) {
+      addLog(`Knowledge bundle load failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(error);
+    } finally {
+      setIsLoadingBundle(false);
+    }
+  };
+
+  const runIntegrityCheck = async () => {
+    setIsRunning(true);
+    addLog("Checking persisted chunks and embedding integrity...");
+    try {
+      const chunks = await knowledgeDB.getAll();
+      const embedded = chunks.filter((chunk) =>
+        Array.isArray(chunk.embedding) &&
+        chunk.embedding.length > 0 &&
+        chunk.embedding.every((value) => Number.isFinite(value))
+      );
+      const dimensions = Array.from(new Set(embedded.map((chunk) => chunk.embedding!.length)));
+      const malformed = chunks.length - embedded.length;
+
+      addLog(`IndexedDB read succeeded: ${chunks.length} chunks found.`);
+      addLog(`${embedded.length} chunks have finite, non-empty vectors; ${malformed} are missing or invalid.`);
+      if (dimensions.length === 1) {
+        addLog(`All stored vectors use ${dimensions[0]} dimensions.`);
+      } else if (dimensions.length > 1) {
+        addLog(`WARNING: mixed vector dimensions found (${dimensions.join(", ")}).`);
+      }
+      await checkDatabase();
+    } catch (error) {
+      addLog(`Integrity check failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(error);
+      setDbStats((previous) => ({ ...previous, status: 'error' }));
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const reindexMissingVectors = async () => {
+    setIsRunning(true);
+    setProgress(0);
+    addLog("Starting vector generation for chunks without embeddings...");
+    try {
+      const { processVectorsInBatches } = await import("@/lib/vector-engine-browser");
+      await processVectorsInBatches((percent, message) => {
+        setProgress(percent);
+        if (message) addLog(message);
+      });
+      addLog("Vector generation completed and saved to IndexedDB.");
+      await checkDatabase();
+    } catch (error) {
+      addLog(`Vector generation failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(error);
+      setDbStats((previous) => ({ ...previous, status: 'error' }));
+    } finally {
       setIsRunning(false);
     }
   };
@@ -128,7 +181,7 @@ export default function KnowledgeDiagnostics() {
               Vector Engine Diagnostics
             </h2>
             <p className="text-[10px] text-slate-400 mt-1 font-mono">
-              System Status: {dbStats.status === 'ready' ? 'ONLINE' : 'INITIALIZING...'}
+              Local Index: {dbStats.status === 'ready' ? 'AVAILABLE' : dbStats.status === 'error' ? 'ERROR' : 'CHECKING...'}
             </p>
           </div>
           <button 
@@ -141,6 +194,15 @@ export default function KnowledgeDiagnostics() {
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
+
+          {isRunning && (
+            <div className="space-y-1 text-xs text-slate-500" role="status">
+              <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
+              </div>
+              <p>Vector operation: {progress}%</p>
+            </div>
+          )}
           
           {/* Stats Cards */}
           <div className="grid grid-cols-2 gap-3">
@@ -161,7 +223,7 @@ export default function KnowledgeDiagnostics() {
                 </p>
                 <Cpu className="h-4 w-4 text-blue-500 mb-1" />
               </div>
-              <p className="text-[9px] text-slate-500 font-medium mt-2">AI Search Ready</p>
+              <p className="text-[9px] text-slate-500 font-medium mt-2">Stored vectors</p>
             </div>
           </div>
 
@@ -210,13 +272,31 @@ export default function KnowledgeDiagnostics() {
 
         {/* Action Footer */}
         <div className="p-4 bg-white border-t border-slate-100 shrink-0">
+          {dbStats.total === 0 && (
+            <button
+              disabled={isLoadingBundle || isRunning}
+              onClick={loadBundledKnowledge}
+              className="w-full mb-2 bg-emerald-600 text-white py-3 rounded-xl font-bold text-xs hover:bg-emerald-700 transition-all disabled:opacity-50"
+            >
+              {isLoadingBundle ? "Loading Knowledge Bundle..." : "Load Precomputed Knowledge Base"}
+            </button>
+          )}
+          {dbStats.total > dbStats.embedded && (
+            <button
+              disabled={isLoadingBundle || isRunning}
+              onClick={reindexMissingVectors}
+              className="w-full mb-2 bg-amber-500 text-white py-3 rounded-xl font-bold text-xs hover:bg-amber-600 transition-all disabled:opacity-50"
+            >
+              {isRunning ? "Generating Missing Vectors..." : `Generate Missing Vectors (${dbStats.total - dbStats.embedded})`}
+            </button>
+          )}
           <button 
-            disabled={isRunning}
-            onClick={testModelLoading}
+            disabled={isRunning || isLoadingBundle}
+            onClick={runIntegrityCheck}
             className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold text-xs hover:bg-slate-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-slate-900/20 active:scale-[0.98]"
           >
             {isRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 text-emerald-400" />}
-            Run Diagnostic Test
+            Verify Stored Vectors
           </button>
           <p className="text-[9px] text-slate-400 text-center mt-3">
             Afia Clinical Intelligence Engine v2.4.0 • Local Environment

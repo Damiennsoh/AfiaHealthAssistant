@@ -17,6 +17,7 @@ export function DatabaseDebug({ minimized = false }: DatabaseDebugProps) {
   const [uploads, setUploads] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [localDBStatus, setLocalDBStatus] = useState<'checking' | 'ready' | 'error'>('checking');
 
   const loadDebugInfo = async () => {
     setLoading(true);
@@ -25,8 +26,10 @@ export function DatabaseDebug({ minimized = false }: DatabaseDebugProps) {
       const uploadList = await uploadDB.getAll();
       setDebugInfo(info);
       setUploads(uploadList as any[]);
+      setLocalDBStatus('ready');
     } catch (error) {
       console.error("Error loading debug info:", error);
+      setLocalDBStatus('error');
       toast.error("Failed to load debug information");
     } finally {
       setLoading(false);
@@ -213,7 +216,7 @@ export function DatabaseDebug({ minimized = false }: DatabaseDebugProps) {
                 Database Diagnostics
               </h2>
               <p className="text-[10px] text-slate-400 mt-1 font-mono">
-                System Status: {loading ? 'CHECKING...' : 'ONLINE'}
+                Local IndexedDB: {loading || localDBStatus === 'checking' ? 'CHECKING...' : localDBStatus === 'ready' ? 'READY' : 'UNAVAILABLE'}
               </p>
             </div>
             <button 

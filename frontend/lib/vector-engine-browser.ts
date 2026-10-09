@@ -8,6 +8,8 @@
  * at module load time, which causes "Cannot convert undefined or null to object" errors.
  */
 
+import { knowledgeSearchService } from './knowledge-search-service';
+
 const DB_NAME = "AfiaKnowledgeDB";
 const STORE_NAME = "knowledge_chunks";
 const DB_VERSION = 2;
@@ -216,6 +218,8 @@ export async function processVectorsInBatches(onProgress: (percent: number, stat
             const savePercent = Math.round(((i + batch.length) / updatedChunks.length) * 50);
             onProgress(baseProgress + savePercent, `Saving: ${Math.min(i + batch.length, updatedChunks.length)}/${updatedChunks.length} chunks...`);
         }
+
+        knowledgeSearchService.refresh();
 
         console.log("Afia Engine: Processing complete. Used ", useWorker ? "Web Worker" : "Main Thread Fallback");
         onProgress(100, `Complete! Embedded ${successfulEmbeddings.length} chunks`);

@@ -53,19 +53,21 @@ export function PatientDetail({ patientId }: { patientId: string }) {
   // Fetch patient data
   const loadData = useCallback(async () => {
     try {
-      const [p, enc] = await Promise.all([
-        patientDB.getById(patientId),
-        encounterDB.getByPatient(patientId),
-      ]);
+      const p = await patientDB.getById(patientId);
       setPatient(p);
-      if (p) {
-        const auditRecorded = await afiaAPI.recordAuditEvent({
-          action: "patient_read",
-          resource_type: "patient",
-          resource_id: patientId,
-        });
-        if (!auditRecorded) console.warn("Patient chart access was not sent to the facility audit server.");
+      if (!p) {
+        setEncounters([]);
+        return;
       }
+
+      const auditRecorded = await afiaAPI.recordAuditEvent({
+        action: "patient_read",
+        resource_type: "patient",
+        resource_id: patientId,
+      });
+      if (!auditRecorded) console.warn("Patient chart access was not sent to the facility audit server.");
+
+      const enc = await encounterDB.getByPatient(patientId);
       setEncounters(
         (enc || []).sort(
           (a, b) =>
