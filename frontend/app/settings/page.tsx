@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useAuth } from "@/contexts/AfiaAuthContext"
+import { useSync } from "@/contexts/SyncContext"
 import { afiaAPI } from "@/lib/afia-api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,12 +17,14 @@ import { toast } from "sonner"
 import { UserManagement } from "@/components/settings/user-management"
 import { ClinicManagement } from "@/components/settings/clinic-management"
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Trash2, AlertTriangle, RefreshCcw } from "lucide-react"
-import { clearClinicalLocalData } from "@/lib/db"
+import { auditDB, clearClinicalLocalData, getLegacyCacheSummary, migrateLegacyCacheToActiveClinic } from "@/lib/db"
+import { syncService } from "@/lib/afia-sync"
+import { OfflineSyncManager } from "@/lib/sync-manager"
 
 export default function SettingsPage() {
-  const { user } = useAuth()
+  const { user, refreshUser, logout } = useAuth()
+  const { syncToCloud } = useSync()
   const { theme, setTheme } = useTheme()
 
   const [passwordForm, setPasswordForm] = useState({
@@ -31,12 +34,36 @@ export default function SettingsPage() {
   })
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const clinicId = user?.clinic_id || ''
-  const isOnline = typeof window !== 'undefined' ? navigator.onLine : true
+  const [isOnline, setIsOnline] = useState(typeof window === 'undefined' ? true : navigator.onLine)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmText, setConfirmText] = useState("")
-  const [includeCloud, setIncludeCloud] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [legacyCache, setLegacyCache] = useState({ patients: 0, encounters: 0 })
+  const [legacyImportOpen, setLegacyImportOpen] = useState(false)
+  const [legacyPassword, setLegacyPassword] = useState("")
+  const [legacyConfirmation, setLegacyConfirmation] = useState("")
+  const [importingLegacy, setImportingLegacy] = useState(false)
+
+  useEffect(() => {
+    if (user?.id) void refreshUser()
+  }, [user?.id, refreshUser])
+
+  useEffect(() => {
+    if (user?.role !== "clinic_admin") return
+    getLegacyCacheSummary().then(setLegacyCache).catch((error) => {
+      console.warn("Could not inspect the previous local cache:", error)
+    })
+  }, [user?.role])
+
+  useEffect(() => {
+    const updateOnlineStatus = () => setIsOnline(navigator.onLine)
+    window.addEventListener('online', updateOnlineStatus)
+    window.addEventListener('offline', updateOnlineStatus)
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus)
+      window.removeEventListener('offline', updateOnlineStatus)
+    }
+  }, [])
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -47,48 +74,106 @@ export default function SettingsPage() {
       return
     }
 
-    if (passwordForm.newPassword.length < 8) {
-      setError("Password must be at least 8 characters long")
+    if (!passwordForm.currentPassword) {
+      setError("Enter your current password to confirm your identity")
+      return
+    }
+
+    if (passwordForm.newPassword.length < 12) {
+      setError("New password must be at least 12 characters long")
+      return
+    }
+    if (!/[A-Z]/.test(passwordForm.newPassword) || !/[a-z]/.test(passwordForm.newPassword) ||
+        !/[0-9]/.test(passwordForm.newPassword) || !/[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(passwordForm.newPassword)) {
+      setError("Use at least 12 characters with uppercase, lowercase, a number, and a special character")
       return
     }
 
     setIsLoading(true)
     try {
-      const response = await afiaAPI.changePassword(
-        passwordForm.currentPassword,
-        passwordForm.newPassword
-      )
-      if (!response.error) {
-        toast.success("Password updated successfully")
-        setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" })
-      } else {
-        setError(response.error || "Failed to update password")
-        toast.error("Failed to update password")
+      if (!isOnline) throw new Error("You must be online to update your account password.")
+      const response = await afiaAPI.changePassword(passwordForm.currentPassword, passwordForm.newPassword)
+      if (response.error) throw new Error(String(response.error))
+      if (!(response.data as { success?: boolean } | undefined)?.success) {
+        throw new Error("The server did not confirm the password change.")
       }
+      toast.success("Password updated successfully")
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" })
     } catch (err) {
-      setError("An unexpected error occurred")
+      const message = err instanceof Error ? err.message : "An unexpected error occurred"
+      setError(message)
+      toast.error(message)
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleClearData = async () => {
-    if (confirmText !== clinicId) {
-      toast.error("Type the facility code exactly to confirm")
+    if (confirmText !== "RESET LOCAL DATA") {
+      toast.error('Type "RESET LOCAL DATA" exactly to confirm')
+      return
+    }
+    if (!isOnline) {
+      toast.error("Connect to the facility server before resetting this device, so unsynced records are not lost.")
+      return
+    }
+    const legacySummary = await getLegacyCacheSummary()
+    if (legacySummary.patients || legacySummary.encounters) {
+      toast.error("The old shared cache still contains records. It may include another facility's data, so this facility-only reset will not delete it. Reconcile it through the legacy-cache migration or have the device securely decommissioned.")
       return
     }
     setDeleting(true)
     try {
+      await syncToCloud()
+      await afiaAPI.syncPendingAuditEvents()
+      const unsyncedChanges = syncService.getQueuedChanges().filter((change) => change.status !== "synced")
+      const legacyUnresolvedCount = await new OfflineSyncManager().getUnresolvedCount()
+      const legacyUnscopedCount = syncService.getLegacyUnscopedPendingCount()
+      const pendingAuditEvents = await auditDB.getPending()
+      if (unsyncedChanges.length || legacyUnresolvedCount || legacyUnscopedCount || pendingAuditEvents.length) {
+        throw new Error("Clinical changes remain unresolved, including changes in the old unscoped queue. Do not reset this device; reconnect with the original facility account or contact support to safely reconcile them.")
+      }
       await clearClinicalLocalData()
-      if (typeof window !== 'undefined') localStorage.removeItem('afia_last_cloud_sync')
-      toast.success(includeCloud ? 'Clinical records archived and local cache cleared' : 'Local device reset successful')
+      syncService.clearQueue()
+      if (typeof window !== 'undefined') localStorage.removeItem('afia_sync_queue')
+      await new OfflineSyncManager().clearQueue()
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('afia_last_cloud_sync')
+        localStorage.removeItem('afia_last_sync')
+      }
+      toast.success("Local clinical cache cleared. No records were deleted from the facility server.")
       setConfirmOpen(false)
       setConfirmText("")
-      setIncludeCloud(false)
+      await logout()
     } catch (e) {
-      toast.error('Failed to clear data')
+      toast.error(e instanceof Error ? e.message : 'Failed to clear data')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleLegacyImport = async () => {
+    const facilityName = String(user?.clinic_name || "").trim()
+    if (!facilityName || legacyConfirmation !== facilityName) {
+      toast.error("Type the facility name exactly to confirm ownership of the old cache.")
+      return
+    }
+    if (!legacyPassword || !isOnline) {
+      toast.error("Enter the password used to encrypt the old cache and connect to the facility server first.")
+      return
+    }
+
+    setImportingLegacy(true)
+    try {
+      const imported = await migrateLegacyCacheToActiveClinic(legacyPassword)
+      toast.success(`Copied ${imported.patients} patient and ${imported.encounters} encounter record(s). The old cache was retained.`)
+      setLegacyImportOpen(false)
+      setLegacyPassword("")
+      setLegacyConfirmation("")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Legacy cache import failed")
+    } finally {
+      setImportingLegacy(false)
     }
   }
 
@@ -131,19 +216,23 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Full Name</Label>
-                  <Input value={user.full_name} disabled className="bg-slate-50" />
+                  <Input value={user.full_name || user.name || user.email || "Name unavailable"} disabled className="bg-slate-50" />
                 </div>
                 <div className="space-y-2">
                   <Label>Staff ID</Label>
-                  <Input value={user.id} disabled className="bg-slate-50" />
+                  <Input value={user.staff_id || "Not assigned"} disabled className="bg-slate-50" />
                 </div>
                 <div className="space-y-2">
                   <Label>Role</Label>
-                  <Input value={user.role} disabled className="bg-slate-50 capitalize" />
+                  <Input value={String(user.role || "").replaceAll("_", " ")} disabled className="bg-slate-50 capitalize" />
                 </div>
                 <div className="space-y-2">
-                  <Label>Facility</Label>
-                  <Input value={user.clinic_id} disabled className="bg-slate-50" />
+                  <Label>{user.role === "super_admin" ? "Access Scope" : "Facility"}</Label>
+                  <Input
+                    value={user.role === "super_admin" ? "Global — all facilities" : (user.clinic_name || "Facility unavailable")}
+                    disabled
+                    className="bg-slate-50"
+                  />
                 </div>
               </div>
             </CardContent>
@@ -168,12 +257,29 @@ export default function SettingsPage() {
                 )}
                 
                 <div className="space-y-2">
+                  <Label htmlFor="current-password">Current Password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                    <Input
+                      id="current-password"
+                      type="password"
+                      autoComplete="current-password"
+                      className="pl-9"
+                      value={passwordForm.currentPassword}
+                      onChange={(e) => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
                   <Label htmlFor="new-password">New Password</Label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                     <Input 
                       id="new-password" 
                       type="password" 
+                      autoComplete="new-password"
                       className="pl-9"
                       value={passwordForm.newPassword}
                       onChange={(e) => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
@@ -189,6 +295,7 @@ export default function SettingsPage() {
                     <Input 
                       id="confirm-password" 
                       type="password" 
+                      autoComplete="new-password"
                       className="pl-9"
                       value={passwordForm.confirmPassword}
                       onChange={(e) => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
@@ -205,6 +312,54 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
           
+          {user.role === "clinic_admin" && <>
+          {(legacyCache.patients > 0 || legacyCache.encounters > 0) && <Card className="border-amber-300">
+            <CardHeader>
+              <CardTitle className="text-amber-800">Previous local cache found</CardTitle>
+              <CardDescription>
+                This browser has {legacyCache.patients} patient and {legacyCache.encounters} encounter record(s) in the old, unpartitioned cache. They are not copied automatically because the old cache has no reliable facility ownership tag.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Alert className="border-amber-200 bg-amber-50">
+                <AlertDescription className="text-amber-900">
+                  Import only if you are certain every record in that old cache belongs to {user.clinic_name || "this facility"}. The old source is retained after import. This imports patients and encounters only.
+                </AlertDescription>
+              </Alert>
+              <Button variant="outline" onClick={() => setLegacyImportOpen(true)} disabled={!isOnline}>
+                Review and Import Previous Cache
+              </Button>
+            </CardContent>
+          </Card>}
+
+          <AlertDialog open={legacyImportOpen} onOpenChange={setLegacyImportOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Confirm old-cache ownership</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This copies legacy patients and encounters into {user.clinic_name || "this facility"}&apos;s isolated local cache. It does not upload or delete records. Only continue if the entire old cache belongs to this facility.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="legacy-cache-password">Password used for the old local cache</Label>
+                  <Input id="legacy-cache-password" type="password" autoComplete="current-password" value={legacyPassword} onChange={(event) => setLegacyPassword(event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="legacy-cache-confirm">Type the facility name: {user.clinic_name}</Label>
+                  <Input id="legacy-cache-confirm" value={legacyConfirmation} onChange={(event) => setLegacyConfirmation(event.target.value)} />
+                </div>
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={importingLegacy}>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={(event) => { event.preventDefault(); void handleLegacyImport() }} disabled={importingLegacy || !isOnline}>
+                  {importingLegacy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Copy legacy records
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -212,21 +367,21 @@ export default function SettingsPage() {
                 Local Device Reset
               </CardTitle>
               <CardDescription>
-                Clear medical records from this device only. Use this when returning a device or troubleshooting. Cloud records remain safe and untouched.
+                Clear this facility&apos;s isolated clinical cache from this browser. This does not delete server records or other facilities&apos; local caches.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 max-w-md">
               <Alert className="bg-amber-50 border-amber-200">
                 <AlertDescription className="text-amber-800">
-                  This only affects <strong>this device</strong>. Your clinical history in Firestore will be preserved for legal compliance.
+                  This affects only <strong>{user.clinic_name || "this facility"}&apos;s isolated cache</strong>. Synced clinical records remain in Neon. Unsynced activity must be resolved first. A detected legacy shared cache is retained until its ownership and records are safely reconciled.
                 </AlertDescription>
               </Alert>
               <div className="flex items-center gap-3">
-                <Button variant="outline" onClick={() => setConfirmOpen(true)} className="gap-2 border-amber-200 hover:bg-amber-50">
+                <Button variant="outline" onClick={() => setConfirmOpen(true)} disabled={legacyCache.patients > 0 || legacyCache.encounters > 0} className="gap-2 border-amber-200 hover:bg-amber-50">
                   <RefreshCcw className="h-4 w-4" />
                   Reset Local Cache
                 </Button>
-                <span className="text-xs text-slate-500">Facility: {clinicId}</span>
+                <span className="text-xs text-slate-500">Facility: {user.clinic_name || "Your facility"}</span>
               </div>
             </CardContent>
           </Card>
@@ -236,32 +391,25 @@ export default function SettingsPage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>System Reset Confirmation</AlertDialogTitle>
                 <AlertDialogDescription>
-                  To prevent accidental wipes, please type the facility code: <span className="font-mono text-slate-900 font-bold">{clinicId}</span>
+                  This clears only {user.clinic_name || "this facility"}&apos;s isolated local cache and signs you out. It does not delete server records, other facility caches, or legacy shared data. Type <span className="font-mono text-slate-900 font-bold">RESET LOCAL DATA</span> to confirm.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <div className="space-y-4">
-                <div className="flex items-center gap-2 rounded-lg border border-red-100 bg-red-50 p-3">
-                  <Checkbox checked={includeCloud} onCheckedChange={(v) => setIncludeCloud(!!v)} />
-                  <div className="flex flex-col">
-                    <span className="text-sm font-semibold text-red-900">Archive Facility Cloud Data</span>
-                    <span className="text-[10px] text-red-700">Clinical Standard: Marks all records as archived (Safe for Audit)</span>
-                  </div>
-                  {!isOnline && includeCloud && <span className="text-xs text-rose-600 ml-2">Online required</span>}
-                </div>
                 <div className="space-y-2">
-                  <Label>Facility Code</Label>
-                  <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder={clinicId} />
+                  <Label>Confirmation phrase</Label>
+                  <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="RESET LOCAL DATA" />
                 </div>
               </div>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleClearData} disabled={deleting || confirmText !== clinicId || (includeCloud && !isOnline)} className="bg-red-600 text-white hover:bg-red-700">
+                <AlertDialogAction onClick={(event) => { event.preventDefault(); void handleClearData() }} disabled={deleting || confirmText !== "RESET LOCAL DATA" || !isOnline} className="bg-red-600 text-white hover:bg-red-700">
                   {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
                   Clear Now
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          </>}
         </TabsContent>
 
         <TabsContent value="appearance" className="space-y-6 mt-6">

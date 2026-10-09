@@ -56,6 +56,8 @@ class UserUpdate(BaseModel):
 class UserResponse(UserBase):
     """User response (sensitive fields excluded)."""
     id: UUID
+    full_name: Optional[str] = None
+    clinic_name: Optional[str] = None
     clinic_id: Optional[UUID] = None
     country_code: str = "GH"
     staff_id: Optional[str] = None

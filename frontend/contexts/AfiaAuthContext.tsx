@@ -1,10 +1,10 @@
 "use client"
 
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { getKey, setActiveKey } from '@/lib/crypto'
 import { afiaAPI } from '@/lib/afia-api'
-import { isGuestEmail, activateGuestDB, activateProdDB } from '@/lib/guest-mode'
+import { isGuestEmail, activateAdminDB, activateClinicDB, activateGuestDB, activateProdDB } from '@/lib/guest-mode'
+import { clearActiveCacheKey, initializeActiveCacheKey } from '@/lib/db'
 
 // Define the Auth Context State shape
 interface AuthContextType {
@@ -32,6 +32,19 @@ interface AuthContextType {
 const AfiaAuthContext = createContext<AuthContextType | undefined>(undefined)
 
 const SESSION_EXPIRY_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+function activateUserCache(profile: any) {
+  clearActiveCacheKey()
+  if (isGuestEmail(profile?.email)) {
+    activateGuestDB()
+  } else if (profile?.role === 'super_admin') {
+    activateAdminDB()
+  } else if (profile?.clinic_id) {
+    activateClinicDB(String(profile.clinic_id))
+  } else {
+    throw new Error('This account is not assigned to a facility. Contact your administrator.')
+  }
+}
 
 // Simple local IndexedDB helper functions
 async function saveSessionToLocalDB(user: any, token: string) {
@@ -152,15 +165,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (localSession && localSession.token) {
           console.log("[AuthContext] Token found locally!")
           const restoredUser = localSession.user
+          activateUserCache(restoredUser)
+          await initializeActiveCacheKey()
           setUser(restoredUser)
           setToken(localSession.token)
-          // Restore the correct DB routing for the restored session
-          if (isGuestEmail(restoredUser?.email)) {
-            activateGuestDB()
-            console.log('[AuthContext] Restored guest session → sandbox DB active')
-          } else {
-            activateProdDB()
-          }
           // Also set token in localStorage for API calls
           localStorage.setItem('afia_access_token', localSession.token)
         } else {
@@ -168,6 +176,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           activateProdDB() // ensure clean state
         }
       } catch (err) {
+        afiaAPI.clearTokens()
+        clearActiveCacheKey()
+        activateProdDB()
         console.error("[AuthContext] Error reading IndexedDB session:", err)
       } finally {
         // ONLY turn off loading once we are 100% finished querying the DB
@@ -207,22 +218,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Invalid API response: Missing authentication token.")
       }
 
-      // Generate and store crypto key in memory
-      const cryptoKey = await getKey(password)
-      setActiveKey(cryptoKey)
-
-      // CRITICAL: We must AWAIT the IndexedDB write before touching React state
-      console.log("[AuthContext] Online auth success. Caching credentials asynchronously to IndexedDB...")
-      await saveSessionToLocalDB(freshUser, freshToken)
-      console.log("[AuthContext] IndexedDB caching complete.")
-
-      // 🪣 Guest DB isolation: switch to the sandbox DB BEFORE setting React state
-      //    so that any downstream effect (sync, patient list) uses the right DB.
-      if (isGuestEmail(freshUser?.email)) {
-        activateGuestDB()
-        console.log('[AuthContext] Guest login detected → switching to sandbox DB')
-      } else {
+      try {
+        activateUserCache(freshUser)
+        await initializeActiveCacheKey(password)
+        await saveSessionToLocalDB(freshUser, freshToken)
+      } catch (error) {
+        afiaAPI.clearTokens()
+        clearActiveCacheKey()
         activateProdDB()
+        throw error
       }
 
       // Now update the React state
@@ -240,12 +244,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (localSession.user.email.toLowerCase() === email.toLowerCase()) {
           console.log("[AuthContext] Offline login match successful!")
           
-          // Generate and store crypto key in memory.
-          // Note: If the password is wrong, they will get a successful "login" here but will fail
-          // to decrypt any patients/encounters when fetching from the DB.
-          const cryptoKey = await getKey(password)
-          setActiveKey(cryptoKey)
-          
+          activateUserCache(localSession.user)
+          await initializeActiveCacheKey()
           setUser(localSession.user)
           setToken(localSession.token)
           localStorage.setItem('afia_access_token', localSession.token)
@@ -260,12 +260,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     console.log("[AuthContext] Logging out user...")
-    setActiveKey(null)
-    await clearSessionFromLocalDB()
-    activateProdDB() // always restore prod DB on logout
-    setUser(null)
-    setToken(null)
-    localStorage.removeItem('afia_access_token')
+    clearActiveCacheKey()
+    try {
+      await afiaAPI.logout()
+    } finally {
+      try {
+        await clearSessionFromLocalDB()
+      } catch (error) {
+        console.warn('[AuthContext] Could not clear cached session record:', error)
+      }
+      activateProdDB() // always restore prod DB on logout
+      setUser(null)
+      setToken(null)
+      localStorage.removeItem('afia_access_token')
+      localStorage.removeItem('afia_refresh_token')
+    }
   }
 
   const can = (permission: string): boolean => {
@@ -295,16 +304,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return permissions.includes('*') || permissions.includes(permission)
   }
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     try {
       const response = await afiaAPI.getCurrentUser()
       if (response.data) {
         setUser(response.data)
+        const accessToken = localStorage.getItem('afia_access_token') || token
+        if (accessToken) await saveSessionToLocalDB(response.data, accessToken)
       }
     } catch (error) {
       console.error('Failed to refresh user:', error)
     }
-  }
+  }, [token])
 
   const verifyAdminPassword = async (password: string): Promise<boolean> => {
     if (!user || !user.clinic_id) return false

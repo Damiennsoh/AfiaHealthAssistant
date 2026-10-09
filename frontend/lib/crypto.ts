@@ -12,6 +12,15 @@ export function getActiveKey(): CryptoKey | null {
   return activeCryptoKey;
 }
 
+/** Generate a random, non-exportable AES key for this device's facility cache. */
+export async function generateDeviceCacheKey(): Promise<CryptoKey> {
+  return window.crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
 export async function getKey(password: string): Promise<CryptoKey> {
   const enc = new TextEncoder();
   

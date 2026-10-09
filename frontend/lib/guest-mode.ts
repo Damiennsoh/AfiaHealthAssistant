@@ -18,6 +18,7 @@ export const PROD_DB_NAME = "afia-health-db";
 
 /** Sandbox IndexedDB name — guest demo only */
 export const GUEST_DB_NAME = "afia-health-guest-db";
+export const ADMIN_DB_NAME = "afia-health-admin-db";
 
 /**
  * Determine if the currently signed-in user is the guest demo account.
@@ -52,4 +53,18 @@ export function activateGuestDB() {
 /** Call this when guest logs out or a real user logs in — switches back to prod DB */
 export function activateProdDB() {
   setActiveDB(PROD_DB_NAME);
+}
+
+/** Select a separate local clinical cache for each facility. */
+export function activateClinicDB(clinicId: string) {
+  const normalizedClinicId = clinicId.trim().toLowerCase();
+  if (!normalizedClinicId || !/^[a-z0-9-]+$/.test(normalizedClinicId)) {
+    throw new Error("A valid clinic ID is required to open the facility cache.");
+  }
+  setActiveDB(`afia-health-clinic-${normalizedClinicId}-db`);
+}
+
+/** Global platform administrators do not share a clinical facility cache. */
+export function activateAdminDB() {
+  setActiveDB(ADMIN_DB_NAME);
 }

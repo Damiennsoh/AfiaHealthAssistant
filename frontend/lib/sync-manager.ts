@@ -13,7 +13,7 @@ export interface SyncQueueItem {
   payload: Record<string, any>;
   version: number;
   createdAt: string;
-  status: 'pending' | 'syncing' | 'failed' | 'conflict';
+  status: 'pending' | 'syncing' | 'failed' | 'conflict' | 'synced';
   retryCount: number;
   lastError?: string;
 }
@@ -123,7 +123,7 @@ export class OfflineSyncManager {
     for (const result of results) {
       if (result.status === 'acknowledged') {
         await this.updateQueueItem(result.offline_id, {
-          status: 'syncing',
+          status: 'synced',
           entityId: result.server_id,
         });
         pushed++;
@@ -138,7 +138,7 @@ export class OfflineSyncManager {
         // Last-Write-Wins logic resolved on the server in favor of the server.
         // We must accept the server's payload.
         await this.updateQueueItem(result.offline_id, {
-          status: 'syncing', // Will be cleared or marked done eventually
+          status: 'synced',
           entityId: result.server_id,
         });
         
@@ -267,5 +267,13 @@ export class OfflineSyncManager {
 
   getPendingCount(): Promise<number> {
     return this.getQueue().then(q => q.filter(item => item.status === 'pending').length);
+  }
+
+  getUnresolvedCount(): Promise<number> {
+    return this.getQueue().then(q => q.filter(item => item.status !== 'synced').length);
+  }
+
+  async clearQueue(): Promise<void> {
+    await this.saveQueue([]);
   }
 }
