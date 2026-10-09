@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { webcrypto } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearClinicalLocalData, initializeActiveCacheKey, patientDB } from '../lib/db';
+import { clearClinicalLocalData, encounterDB, initializeActiveCacheKey, patientDB } from '../lib/db';
 import { setActiveKey } from '../lib/crypto';
 import { activateClinicDB, getActiveDB, setActiveDB } from '../lib/guest-mode';
 
@@ -58,6 +58,35 @@ describe('settings account security workflows', () => {
     setActiveKey(null);
     await initializeActiveCacheKey();
     expect(await patientDB.getById(testPatient.id)).toMatchObject({ name: 'Test Patient', phone: '555-0100' });
+  });
+
+  it('repairs the patientId index when upgrading an existing facility cache', async () => {
+    const legacyDbName = 'afia-legacy-clinic-cache-test';
+    setActiveDB(legacyDbName);
+
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open(legacyDbName, 7);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        db.createObjectStore('patients', { keyPath: 'id' });
+        db.createObjectStore('encounters', { keyPath: 'id' });
+      };
+      request.onsuccess = () => {
+        request.result.close();
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+
+    await expect(encounterDB.getByPatient('patient-with-no-encounters')).resolves.toEqual([]);
+
+    const upgradedDb = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(legacyDbName, 8);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    expect(upgradedDb.transaction('encounters').objectStore('encounters').indexNames.contains('patientId')).toBe(true);
+    upgradedDb.close();
   });
 
   it('uses a dedicated admin cache and never aliases production clinic storage', () => {

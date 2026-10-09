@@ -8,7 +8,7 @@ import { getActiveDB, PROD_DB_NAME } from './guest-mode';
 // staff always use 'afia-health-db'. Never hardcode this constant in
 // openDB() calls — always use getActiveDB() instead.
 const DB_NAME = "afia-health-db"; // fallback — openDB() uses getActiveDB() at runtime
-export const DB_VERSION = 7; // 6→7 adds a persisted device cache-encryption key
+export const DB_VERSION = 8; // 7→8 repairs the encounter patientId index in existing facility caches
 const deviceCacheKeys = new Map<string, CryptoKey>();
 
 export function clearActiveCacheKey(): void {
@@ -277,6 +277,7 @@ function openDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
+      const upgradeTransaction = (event.target as IDBOpenDBRequest).transaction;
 
       if (!db.objectStoreNames.contains("patients")) {
         const patientStore = db.createObjectStore("patients", {
@@ -343,6 +344,14 @@ function openDB(): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains("device_keys")) {
         db.createObjectStore("device_keys", { keyPath: "id" });
+      }
+
+      // Earlier versions only created indexes when creating a store. Existing
+      // facility caches can therefore have an encounters store without the
+      // patientId index required by encounterDB.getByPatient().
+      const encountersStore = upgradeTransaction?.objectStore("encounters");
+      if (encountersStore && !encountersStore.indexNames.contains("patientId")) {
+        encountersStore.createIndex("patientId", "patientId", { unique: false });
       }
     };
 
