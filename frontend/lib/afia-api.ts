@@ -3,6 +3,8 @@
  * Replaces Firebase SDK calls with REST API calls to self-hosted backend
  */
 
+import { auditDB, generateId, type AuditLog } from "@/lib/db";
+
 // Get API base URL - must work in both SSR and client contexts
 function getAPIBase(): string {
   // In Next.js, process.env.NEXT_PUBLIC_* variables are available at build time
@@ -49,6 +51,7 @@ class AfiaAPI {
       this.token = localStorage.getItem('afia_access_token');
       this.refreshToken = localStorage.getItem('afia_refresh_token');
       this.countryCode = localStorage.getItem('afia_country') || 'GH';
+      window.addEventListener('online', () => { void this.syncPendingAuditEvents(); });
     }
   }
 
@@ -80,6 +83,7 @@ class AfiaAPI {
       localStorage.setItem('afia_access_token', accessToken);
       localStorage.setItem('afia_refresh_token', refreshToken);
     }
+    void this.syncPendingAuditEvents();
   }
 
   /**
@@ -95,6 +99,51 @@ class AfiaAPI {
     }
   }
 
+  private getTokenClaims(): Record<string, unknown> | null {
+    if (!this.token) return null;
+    try {
+      const tokenPayload = this.token.split('.')[1];
+      const base64 = tokenPayload.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+      return JSON.parse(atob(padded)) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  private async submitAuditEntry(entry: AuditLog): Promise<boolean> {
+    const claims = this.getTokenClaims();
+    if (claims?.sub !== entry.userId) return false;
+
+    const response = await this.request('/api/v1/audit/events', {
+      method: 'POST',
+      body: JSON.stringify({
+        action: entry.action,
+        resource_type: entry.resourceType,
+        resource_id: entry.resourceId,
+        details: entry.details,
+        expected_user_id: entry.userId,
+      }),
+    });
+    if (response.error) return false;
+
+    await auditDB.remove(entry.id);
+    return true;
+  }
+
+  async syncPendingAuditEvents(): Promise<void> {
+    const claims = this.getTokenClaims();
+    if (typeof claims?.sub !== 'string' || !['clinic_admin', 'healthworker'].includes(String(claims.role))) return;
+
+    try {
+      const pending = await auditDB.getPending();
+      for (const entry of pending) {
+        if (entry.userId === claims.sub && !(await this.submitAuditEntry(entry))) break;
+      }
+    } catch (error) {
+      console.warn('[AfiaAPI] Could not retry pending audit events:', error);
+    }
+  }
   /**
    * Make authenticated API request with retries
    */
@@ -682,6 +731,48 @@ class AfiaAPI {
   // =========================================================================
   // AUDIT LOGS
   // =========================================================================
+
+  async recordAuditEvent(event: {
+    action: string;
+    resource_type?: string;
+    resource_id?: string;
+    details?: Record<string, unknown>;
+  }): Promise<boolean> {
+    const claims = this.getTokenClaims();
+    if (typeof claims?.sub !== 'string' || !['clinic_admin', 'healthworker'].includes(String(claims.role))) {
+      return false;
+    }
+
+    await this.syncPendingAuditEvents();
+
+    const entry: AuditLog = {
+      id: generateId(),
+      action: event.action,
+      userId: claims.sub,
+      userEmail: typeof claims.email === 'string' ? claims.email : null,
+      userName: null,
+      userRole: String(claims.role),
+      clinicId: typeof claims.clinic_id === 'string' ? claims.clinic_id : null,
+      clinicName: null,
+      countryCode: typeof claims.country_code === 'string' ? claims.country_code : null,
+      resourceType: event.resource_type || null,
+      resourceId: event.resource_id || null,
+      details: event.details || {},
+      createdAt: new Date().toISOString(),
+      pendingSync: true,
+    };
+
+    try {
+      await auditDB.savePending(entry);
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+      const synced = await this.submitAuditEntry(entry);
+      if (!synced) console.warn('[AfiaAPI] Clinical audit event remains queued for retry:', event.action);
+      return synced;
+    } catch (error) {
+      console.warn('[AfiaAPI] Could not queue clinical audit event:', event.action, error);
+      return false;
+    }
+  }
 
   async getAuditLogs(params?: {
     start_date?: string;

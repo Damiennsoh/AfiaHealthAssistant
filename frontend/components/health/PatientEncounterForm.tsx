@@ -23,6 +23,7 @@ import {
   Stethoscope
 } from "lucide-react";
 import { encounterDB, generateId, patientDB } from "@/lib/db";
+import { afiaAPI } from "@/lib/afia-api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PatientLookup } from "./PatientLookup";
 import { useVitalAlerts } from "@/hooks/use-vital-alerts";
@@ -226,6 +227,12 @@ export default function PatientEncounterForm() {
 
     try {
       await encounterDB.save(encounter as any);
+      const auditRecorded = await afiaAPI.recordAuditEvent({
+        action: "encounter_created",
+        resource_type: "encounter",
+        resource_id: encounter.id,
+      });
+      if (!auditRecorded) toast.warning("Encounter saved, but the audit event could not be sent to the facility server.");
       
       // Proactively trigger cloud sync if online
       if (syncToCloud) {

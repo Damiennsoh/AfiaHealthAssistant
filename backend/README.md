@@ -24,6 +24,10 @@ python scripts/create_superadmin.py \
 
 The API will be available at [http://localhost:8000](http://localhost:8000).
 
+### Audit-log schema update
+
+Before deploying the clinical audit action additions to an existing PostgreSQL/Neon database, run [`scripts/add_clinical_audit_actions.sql`](scripts/add_clinical_audit_actions.sql) in the database SQL editor. It adds the enum values required for staff deactivation, backup, referral, and clinical record events. New databases created from the current models do not need this one-time migration.
+
 ---
 
 ## 🗂️ Directory Structure

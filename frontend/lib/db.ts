@@ -8,7 +8,7 @@ import { getActiveDB } from './guest-mode';
 // staff always use 'afia-health-db'. Never hardcode this constant in
 // openDB() calls — always use getActiveDB() instead.
 const DB_NAME = "afia-health-db"; // fallback — openDB() uses getActiveDB() at runtime
-const DB_VERSION = 5; // Updated to fix missing object stores (aiRequests, uploads)
+export const DB_VERSION = 6; // 5→6 adds audit_logs store for tamper-evident append-only action trail
 
 export interface Patient {
   id: string;
@@ -107,6 +107,60 @@ export interface Encounter {
   isDeleted?: boolean;
   deletedAt?: string | null;
   deletedBy?: string | null;
+}
+
+export type AuditAction =
+  | 'login'
+  | 'login_failed'
+  | 'logout'
+  | 'staff_added'
+  | 'staff_deactivated'
+  | 'staff_role_changed'
+  | 'user_created'
+  | 'user_deleted'
+  | 'user_updated'
+  | 'patient_created'
+  | 'patient_updated'
+  | 'patient_deleted'
+  | 'patient_read'
+  | 'encounter_created'
+  | 'encounter_updated'
+  | 'encounter_completed'
+  | 'encounter_deleted'
+  | 'encounter_read'
+  | 'backup_created'
+  | 'backup_restored'
+  | 'report_exported'
+  | 'patient_referred'
+  | 'clinic_suspended'
+  | 'clinic_unsuspended'
+  | 'clinic_archived'
+  | 'clinic_deleted'
+  | 'clinic_updated'
+  | 'admin_password_reset'
+  | 'clinic_settings_updated'
+  | 'profile_updated'
+  | 'knowledge_uploaded'
+  | 'knowledge_deleted';
+
+export interface AuditLog {
+  id: string;
+  action: AuditAction | string;
+  userId: string | null;
+  userEmail: string | null;
+  userName: string | null;
+  userRole: string | null;
+  clinicId: string | null;
+  clinicName: string | null;
+  countryCode: 'GH' | 'ZW' | string | null;
+  resourceType: 'clinic' | 'user' | 'patient' | 'encounter' | 'backup' | 'report' | 'referral' | 'staff' | 'knowledge' | 'session' | 'system' | string | null;
+  resourceId: string | null;
+  details: Record<string, any>;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  deviceId?: string | null;
+  createdAt: string;
+  pendingSync?: boolean;
 }
 
 export interface DrugAdministration {
@@ -262,6 +316,17 @@ function openDB(): Promise<IDBDatabase> {
         userStore.createIndex("staffId", "staffId", { unique: true });
         userStore.createIndex("role", "role", { unique: false });
         userStore.createIndex("facility", "facility", { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains("audit_logs")) {
+        const auditStore = db.createObjectStore("audit_logs", {
+          keyPath: "id",
+        });
+        auditStore.createIndex("action", "action", { unique: false });
+        auditStore.createIndex("createdAt", "createdAt", { unique: false });
+        auditStore.createIndex("clinicId", "clinicId", { unique: false });
+        auditStore.createIndex("userId", "userId", { unique: false });
+        auditStore.createIndex("resourceType_resourceId", ["resourceType", "resourceId"], { unique: false, multiEntry: false } as any);
       }
     };
 
@@ -918,6 +983,12 @@ export const metadataDB = {
   subscribe: (listener: DBChangeListener) => subscribe("metadata", listener),
   getAll: () => getAll<any>("metadata"),
   save: (item: any) => put<any>("metadata", item),
+};
+
+export const auditDB = {
+  savePending: (entry: AuditLog) => put<AuditLog>("audit_logs", { ...entry, pendingSync: true }),
+  getPending: async () => (await getAll<AuditLog>("audit_logs", true)).filter((entry) => entry.pendingSync),
+  remove: (id: string) => deleteById("audit_logs", id),
 };
 
 // Generate unique IDs

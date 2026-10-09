@@ -27,39 +27,49 @@ interface AuditLog {
 }
 
 const ACTION_LABELS: Record<string, string> = {
-  clinic_suspended: "Clinic Suspended",
-  clinic_unsuspended: "Clinic Unsuspended",
-  clinic_archived: "Clinic Archived",
-  clinic_deleted: "Clinic Deleted",
-  clinic_updated: "Clinic Updated",
   user_created: "User Created",
   user_deleted: "User Deleted",
   patient_created: "Patient Created",
   patient_updated: "Patient Updated",
   patient_read: "Patient Viewed",
+  patient_searched: "Patient Search Performed",
   encounter_created: "Encounter Created",
   encounter_updated: "Encounter Updated",
   encounter_read: "Encounter Viewed",
   staff_added: "Staff Added",
   staff_deleted: "Staff Deleted",
+  staff_deactivated: "Staff Deactivated",
+  user_updated: "Staff Details Updated",
+  patient_deleted: "Patient Record Deactivated",
+  encounter_completed: "Encounter Completed",
+  encounter_deleted: "Encounter Deleted",
+  backup_created: "Backup Created",
+  backup_restored: "Backup Restored",
+  report_exported: "Report Exported",
+  patient_referred: "Patient Referred",
 }
 
 const ACTION_COLORS: Record<string, string> = {
-  clinic_suspended: "bg-yellow-500",
-  clinic_unsuspended: "bg-green-500",
-  clinic_archived: "bg-gray-500",
-  clinic_deleted: "bg-red-500",
-  clinic_updated: "bg-blue-500",
   user_created: "bg-green-500",
   user_deleted: "bg-red-500",
   patient_created: "bg-green-500",
   patient_updated: "bg-blue-500",
   patient_read: "bg-gray-500",
+  patient_searched: "bg-gray-500",
   encounter_created: "bg-green-500",
   encounter_updated: "bg-blue-500",
   encounter_read: "bg-gray-500",
   staff_added: "bg-green-500",
   staff_deleted: "bg-red-500",
+  staff_deactivated: "bg-red-500",
+  user_updated: "bg-blue-500",
+  patient_deleted: "bg-red-500",
+  encounter_completed: "bg-green-500",
+  encounter_deleted: "bg-red-500",
+  backup_created: "bg-indigo-500",
+  backup_restored: "bg-indigo-500",
+  report_exported: "bg-purple-500",
+  patient_referred: "bg-amber-500",
 }
 
 export default function AuditLogsPage() {
@@ -76,20 +86,6 @@ export default function AuditLogsPage() {
   const [endDate, setEndDate] = useState("")
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
-
-  // Check permissions
-  if (user?.role === "healthworker") {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle>Access Denied</CardTitle>
-            <CardDescription>You don't have permission to view audit logs.</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    )
-  }
 
   const loadLogs = async (resetOffset = false) => {
     setIsLoading(true)
@@ -146,8 +142,8 @@ export default function AuditLogsPage() {
   }
 
   useEffect(() => {
-    loadLogs(true)
-  }, [])
+    if (user?.role === "clinic_admin") loadLogs(true)
+  }, [user?.role])
 
   const handleSearch = () => {
     loadLogs(true)
@@ -159,6 +155,19 @@ export default function AuditLogsPage() {
 
   const getActionLabel = (action: string) => {
     return ACTION_LABELS[action] || action.replace(/_/g, " ").toUpperCase()
+  }
+
+  if (user?.role !== "clinic_admin") {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle>Access Denied</CardTitle>
+            <CardDescription>You don't have permission to view audit logs.</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    )
   }
 
   return (
@@ -190,10 +199,7 @@ export default function AuditLogsPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Audit Logs</h1>
             <p className="text-muted-foreground text-sm sm:text-base">
-              {user?.role === "super_admin" 
-                ? "View all clinic-level events and changes"
-                : "View your clinic's patient, encounter, and staff events"
-              }
+              View clinical, staff, backup, and referral activity for your facility
             </p>
           </div>
         </div>

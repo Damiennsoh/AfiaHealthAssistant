@@ -10,6 +10,7 @@ import {
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import type { Patient, ReferralTrigger, VitalAlert } from "@/lib/db";
+import { afiaAPI } from "@/lib/afia-api";
 
 /**
  * Robust Referral System
@@ -103,9 +104,21 @@ export function ReferralModal({
 
       pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
       pdf.save(`GHS_REFERRAL_${patient?.name?.toUpperCase().replace(/\s+/g, "_") || "PATIENT"}.pdf`);
+      const auditRecorded = await afiaAPI.recordAuditEvent({
+        action: "patient_referred",
+        resource_type: "referral",
+        resource_id: patient?.id,
+      });
+      if (!auditRecorded) console.warn("Referral generated, but the audit event could not be sent to the facility server.");
     } catch (error) {
       console.error("PDF Generation failed:", error);
       window.print(); // Fallback to browser print
+      const auditRecorded = await afiaAPI.recordAuditEvent({
+        action: "patient_referred",
+        resource_type: "referral",
+        resource_id: patient?.id,
+      });
+      if (!auditRecorded) console.warn("Referral printed, but the audit event could not be sent to the facility server.");
     }
   };
 

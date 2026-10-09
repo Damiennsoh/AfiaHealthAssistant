@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { encounterDB, type Encounter } from "@/lib/db";
+import { afiaAPI } from "@/lib/afia-api";
 import { toast } from "sonner";
 import { AdminAuthModal } from "./admin-auth-modal";
 import { useAuth } from "@/contexts/AfiaAuthContext";
@@ -94,6 +95,12 @@ export function EditEncounterModal({
       };
 
       await encounterDB.save(updatedEncounter);
+      const auditRecorded = await afiaAPI.recordAuditEvent({
+        action: "encounter_updated",
+        resource_type: "encounter",
+        resource_id: encounter.id,
+      });
+      if (!auditRecorded) toast.warning("Encounter updated, but the audit event could not be sent to the facility server.");
       
       // Proactively trigger cloud sync if online
       if (syncToCloud) {
