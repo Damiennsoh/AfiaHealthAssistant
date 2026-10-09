@@ -1,5 +1,6 @@
 // lib/knowledge-loader.ts
 import { openDB } from 'idb';
+import { knowledgeSearchService } from './knowledge-search-service';
 
 const DB_NAME = 'AfiaKnowledgeDB';
 const STORE_NAME = 'knowledge_chunks';
@@ -136,6 +137,19 @@ export const loadPrecomputedKnowledge = async (onProgress?: (progress: number) =
     }
     
     await tx.done;
+
+    // IndexedDB survives normal browser sessions. Request persistent storage as
+    // an additional safeguard against browser quota eviction when supported.
+    if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
+      try {
+        await navigator.storage.persist();
+      } catch (error) {
+        console.warn('Persistent browser storage could not be requested:', error);
+      }
+    }
+
+    // The search worker keeps a RAM snapshot, so refresh it after the write.
+    knowledgeSearchService.refresh();
     
     console.log(`✅ Successfully saved ${chunks.length} chunks to IndexedDB`);
     

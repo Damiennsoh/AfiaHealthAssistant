@@ -17,7 +17,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { patientDB, encounterDB, aiRequestDB, uploadDB, dbCleanup } from "@/lib/db";
+import { patientDB, encounterDB, aiRequestDB, uploadDB } from "@/lib/db";
 import type { Patient, Encounter, UploadTask } from "@/lib/db";
 import { PatientCard } from "@/components/patient-card";
 import { DatabaseDebug } from "@/components/database-debug";
@@ -38,10 +38,6 @@ export function DashboardContent() {
   useEffect(() => {
     async function loadData() {
       try {
-        // Clean up any stuck tasks first
-        await dbCleanup.clearStuckAIRequests();
-        await dbCleanup.clearFailedUploads();
-        
         const [patients, allEncounters, queuedAIRequests, processingAIRequests, uploadTasks] = await Promise.all([
           patientDB.getAll(),
           encounterDB.getAll(),
