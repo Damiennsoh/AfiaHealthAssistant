@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Users,
   Stethoscope,
@@ -25,6 +26,7 @@ import KnowledgeDiagnostics from "@/components/KnowledgeDiagnostics";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 
 export function DashboardContent() {
+  const router = useRouter();
   const isOnline = useOnlineStatus();
   const [stats, setStats] = useState({
     patients: 0,
@@ -240,7 +242,7 @@ export function DashboardContent() {
                   patient={patient}
                   compact
                   onClick={() => {
-                    window.location.href = `/patients/${patient.id}`;
+                    router.push(`/patients/${patient.id}`);
                   }}
                 />
               ))
