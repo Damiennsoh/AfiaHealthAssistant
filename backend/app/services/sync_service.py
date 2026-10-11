@@ -152,7 +152,9 @@ class SyncService:
 
         if existing:
             # Check version conflict with Last-Write-Wins (LWW)
-            if existing.sync_version > item.payload_version:
+            existing_version = existing.sync_version or 1
+            item_version = item.payload_version or 1
+            if existing_version > item_version:
                 if not client_updated_at or (existing.updated_at and existing.updated_at.tzinfo and client_updated_at <= existing.updated_at):
                     return SyncResult(
                         offline_id=item.offline_id,
@@ -206,7 +208,7 @@ class SyncService:
             if "isDeleted" in payload or "deleted" in payload:
                 existing.is_active = not bool(payload.get("isDeleted") or payload.get("deleted", False))
 
-            existing.sync_version = max(existing.sync_version, item.payload_version or 1) + 1
+            existing.sync_version = max(existing.sync_version or 1, item.payload_version or 1) + 1
             existing.last_sync_at = datetime.now(timezone.utc)
             if client_updated_at:
                 existing.updated_at = client_updated_at
@@ -317,7 +319,9 @@ class SyncService:
 
         if existing:
             # Check version conflict with Last-Write-Wins (LWW)
-            if existing.sync_version > item.payload_version:
+            existing_version = existing.sync_version or 1
+            item_version = item.payload_version or 1
+            if existing_version > item_version:
                 if not client_updated_at or (existing.updated_at and existing.updated_at.tzinfo and client_updated_at <= existing.updated_at):
                     return SyncResult(
                         offline_id=item.offline_id,
@@ -347,7 +351,7 @@ class SyncService:
             if payload.get("status"):
                 existing.status = EncounterStatus.COMPLETED if payload.get("status") == "completed" else EncounterStatus.DRAFT
 
-            existing.sync_version = max(existing.sync_version, item.payload_version or 1) + 1
+            existing.sync_version = max(existing.sync_version or 1, item.payload_version or 1) + 1
             existing.last_sync_at = datetime.now(timezone.utc)
             if client_updated_at:
                 existing.updated_at = client_updated_at
@@ -369,7 +373,10 @@ class SyncService:
                     select(Patient).where(
                         and_(
                             Patient.clinic_id == user.clinic_id,
-                            Patient.offline_id == str(patient_ref),
+                            or_(
+                                Patient.offline_id == str(patient_ref),
+                                Patient.folder_number == str(patient_ref),
+                            )
                         )
                     )
                 )
@@ -388,6 +395,19 @@ class SyncService:
                         patient = p_res.scalar_one_or_none()
                     except (ValueError, TypeError):
                         pass
+
+            if not patient:
+                folder_ref = payload.get("folderNumber") or payload.get("patientFolderNumber")
+                if folder_ref:
+                    p_res = await self.db.execute(
+                        select(Patient).where(
+                            and_(
+                                Patient.clinic_id == user.clinic_id,
+                                Patient.folder_number == str(folder_ref),
+                            )
+                        )
+                    )
+                    patient = p_res.scalar_one_or_none()
 
             if not patient:
                 return SyncResult(
@@ -449,7 +469,7 @@ class SyncService:
         # 1. Patients modified since last sync
         patient_conditions = [Patient.clinic_id == user.clinic_id]
         if last_sync_at:
-            patient_conditions.append(Patient.updated_at > last_sync_at)
+            patient_conditions.append(func.coalesce(Patient.updated_at, Patient.created_at) > last_sync_at)
         patient_query = select(Patient).where(and_(*patient_conditions)).order_by(Patient.updated_at.asc())
 
         patient_result = await self.db.execute(patient_query)
@@ -462,14 +482,14 @@ class SyncService:
                 entity_type=SyncEntityType.PATIENT,
                 entity_server_id=patient.id,
                 payload=patient.to_offline_dict(),
-                payload_version=patient.sync_version,
+                payload_version=patient.sync_version or 1,
                 created_at=patient.updated_at or patient.created_at or datetime.now(timezone.utc),
             ))
 
         # 2. Encounters modified since last sync
         encounter_conditions = [Encounter.clinic_id == user.clinic_id]
         if last_sync_at:
-            encounter_conditions.append(Encounter.updated_at > last_sync_at)
+            encounter_conditions.append(func.coalesce(Encounter.updated_at, Encounter.created_at) > last_sync_at)
         encounter_query = (
             select(Encounter)
             .options(selectinload(Encounter.patient))
@@ -486,7 +506,7 @@ class SyncService:
                 entity_type=SyncEntityType.ENCOUNTER,
                 entity_server_id=encounter.id,
                 payload=encounter.to_offline_dict(),
-                payload_version=encounter.sync_version,
+                payload_version=encounter.sync_version or 1,
                 created_at=encounter.updated_at or encounter.created_at or datetime.now(timezone.utc),
             ))
 

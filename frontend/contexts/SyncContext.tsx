@@ -43,9 +43,11 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
 
-  // Track queued patient IDs so we don't re-queue on every syncToCloud call
-  const queuedPatientIds = useRef<Set<string>>(new Set());
-  const queuedEncounterIds = useRef<Set<string>>(new Set());
+  // Track already-synced record IDs for the current session to avoid redundant
+  // re-queuing. Unlike the old Set-based approach, records that FAILED sync are
+  // removed from this set so they will be re-queued on the next syncToCloud call.
+  const syncedPatientIds = useRef<Set<string>>(new Set());
+  const syncedEncounterIds = useRef<Set<string>>(new Set());
 
   // Listen to network state
   useEffect(() => {
@@ -63,17 +65,19 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Auto-sync every 30 seconds when online — DISABLED for guest demo sessions
   useEffect(() => {
     if (!user || isGuestMode || user.role === 'super_admin' || !user.clinic_id) {
-      queuedPatientIds.current.clear();
-      queuedEncounterIds.current.clear();
+      syncedPatientIds.current.clear();
+      syncedEncounterIds.current.clear();
       syncService.clearClinicScope();
       syncService.stopAutoSync();
       return;
     }
-    queuedPatientIds.current.clear();
-    queuedEncounterIds.current.clear();
+    syncedPatientIds.current.clear();
+    syncedEncounterIds.current.clear();
     syncService.setClinicScope(String(user.clinic_id));
 
-    // Proactively pull latest records from server on login / scope change
+    // Proactively pull latest records from server on login / scope change.
+    // On a brand-new device the local DB is empty; the pull fetches ALL clinic
+    // records from the server (lastSync is null ➜ no timestamp filter).
     syncService.pullAndReconcile().then(result => {
       console.log(`[Sync] 📥 Initial login pull: ${result.pulledPatients} patients, ${result.pulledEncounters} encounters`);
       if (result.pulledPatients > 0 || result.pulledEncounters > 0) {
@@ -90,6 +94,10 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   /**
    * Queue any un-synced IndexedDB records and push to backend.
    * Called by form components after saving data locally.
+   *
+   * Records are always re-checked on each call. A record is skipped only if
+   * it was already successfully synced during THIS browser session and has not
+   * been modified since (tracked via syncedPatientIds / syncedEncounterIds).
    */
   const syncToCloud = useCallback(async (): Promise<void> => {
     if (!user) return;
@@ -111,21 +119,19 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setIsSyncing(true);
     try {
-      // --- Queue patients that haven't been queued yet ---
+      // --- Queue patients that need syncing ---
       const patients = await patientDB.getAll(true); // include soft-deleted
       for (const patient of patients) {
-        if (!queuedPatientIds.current.has(patient.id)) {
-          queuedPatientIds.current.add(patient.id);
+        if (!syncedPatientIds.current.has(patient.id)) {
           const action = patient.isDeleted ? 'delete' : 'create';
           syncService.queueChange(action, 'patient', patient.id, patient as any);
         }
       }
 
-      // --- Queue encounters that haven't been queued yet ---
+      // --- Queue encounters that need syncing ---
       const encounters = await encounterDB.getAll(true); // include soft-deleted
       for (const encounter of encounters) {
-        if (!queuedEncounterIds.current.has(encounter.id)) {
-          queuedEncounterIds.current.add(encounter.id);
+        if (!syncedEncounterIds.current.has(encounter.id)) {
           const action = encounter.isDeleted ? 'delete' : 'create';
           syncService.queueChange(action, 'encounter', encounter.id, encounter as any);
         }
@@ -137,7 +143,20 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (result.synced > 0) {
         setLastSync(new Date());
+        // Mark successfully synced records so they aren't re-queued unnecessarily
+        for (const p of patients) syncedPatientIds.current.add(p.id);
+        for (const e of encounters) syncedEncounterIds.current.add(e.id);
       }
+
+      // If some failed, remove them from the synced set so they get re-queued
+      if (result.failed > 0) {
+        const failedChanges = syncService.getChangesByStatus('failed');
+        for (const fc of failedChanges) {
+          if (fc.resourceType === 'patient') syncedPatientIds.current.delete(fc.resourceId);
+          if (fc.resourceType === 'encounter') syncedEncounterIds.current.delete(fc.resourceId);
+        }
+      }
+
       setPendingSyncCount(syncService.getPendingCount());
     } catch (error) {
       console.error('[Sync] syncToCloud error:', error);
@@ -174,3 +193,4 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
 };
 
 export const useSync = () => useContext(SyncContext);
+

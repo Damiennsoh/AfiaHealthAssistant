@@ -239,7 +239,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!isGuestEmail(freshUser?.email) && freshUser?.clinic_id) {
         try {
           syncService.setClinicScope(String(freshUser.clinic_id))
-          syncService.pullAndReconcile().catch(err => {
+          await syncService.pullAndReconcile().catch(err => {
             console.warn('[AuthContext] Post-login sync pull failed:', err)
           })
         } catch (syncErr) {
