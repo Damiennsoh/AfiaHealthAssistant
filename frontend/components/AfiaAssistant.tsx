@@ -31,7 +31,8 @@ import {
 import Link from "next/link";
 import { encounterDB, patientDB, generateId, aiRequestDB } from "@/lib/db";
 import type { Encounter, Patient, DrugAdministration, AIRequest } from "@/lib/db";
-import { formatKnowledgeForAI } from "@/lib/knowledge-base";
+import { formatKnowledgeForAI, type KnowledgeChunk } from "@/lib/knowledge-base";
+import { afiaAPI } from "@/lib/afia-api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -59,6 +60,90 @@ const sectionConfig = {
 
 // Text sanitization helper
 const cleanText = (text: string) => text.replace(/[#*_~`]/g, "").replace(/\n{3,}/g, "\n\n").trim();
+
+const REMOTE_RETRIEVAL_TIMEOUT_MS = 3000;
+const LOCAL_RETRIEVAL_TIMEOUT_MS = 5000;
+
+type QdrantResult = {
+  text: string;
+  source: string;
+  metadata: Record<string, unknown>;
+  confidence: number;
+  citation: string;
+};
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timeout));
+}
+
+function removePatientIdentifiers(query: string, patient: Patient | null, encounter: Encounter | null): string {
+  const identifiers = [patient?.name, patient?.id, encounter?.id].filter(
+    (identifier): identifier is string => Boolean(identifier?.trim())
+  );
+  const redacted = identifiers.reduce((text, identifier) => {
+    const escapedIdentifier = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text.replace(new RegExp(`\\b${escapedIdentifier}\\b`, "gi"), " ");
+  }, query);
+
+  return redacted
+    .replace(/\b(?:patient|client)\s+(?:id|name)\s*[:#]?\s*\S+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function mergeRetrievedKnowledge(
+  keywordChunks: KnowledgeChunk[],
+  semanticMatches: Array<{ chunk: KnowledgeChunk; score: number }>,
+  remoteResults: QdrantResult[],
+  countryCode: 'GH' | 'ZW'
+) {
+  const candidates: Array<{ chunk: KnowledgeChunk; score: number; provider: string }> = [
+    ...remoteResults
+      .filter((result) => Number.isFinite(result.confidence) && result.confidence >= 0.25)
+      .map((result, index) => ({
+      chunk: {
+        id: `qdrant-${countryCode}-${index}`,
+        section: String(result.metadata.chapter || result.metadata.section || result.citation || `Result ${index + 1}`),
+        content: result.text,
+        source: result.citation || result.source || (
+          countryCode === "ZW"
+            ? "MOHCC EDLIZ 8th Edition 2020"
+            : "GHS Standard Treatment Guidelines 7th Edition 2017"
+        ),
+        dateAdded: "",
+        countryCode,
+      },
+      score: result.confidence,
+      provider: "Qdrant",
+    })),
+    ...semanticMatches.map((match) => ({ chunk: match.chunk, score: match.score, provider: "Local IndexedDB" })),
+    ...keywordChunks.map((chunk) => ({
+      chunk,
+      score: (chunk as KnowledgeChunk & { _score?: number })._score ?? 0.6,
+      provider: "Local IndexedDB",
+    })),
+  ].filter((candidate) => candidate.chunk.content.trim().length > 0);
+
+  const bestByContent = new Map<string, (typeof candidates)[number]>();
+  for (const candidate of candidates) {
+    const key = candidate.chunk.content.toLowerCase().replace(/\s+/g, " ").trim();
+    const existing = bestByContent.get(key);
+    if (!existing || candidate.score > existing.score) bestByContent.set(key, candidate);
+  }
+
+  const ranked = Array.from(bestByContent.values()).sort((a, b) => b.score - a.score).slice(0, 8);
+  return {
+    chunks: ranked.map(({ chunk }) => chunk),
+    providers: Array.from(new Set(ranked.map(({ provider }) => provider))),
+    citations: Array.from(new Set(ranked.map(({ chunk }) => chunk.source))).slice(0, 5),
+  };
+}
 
 export interface StructuredClinicalResponse {
   diagnosis: string;
@@ -107,7 +192,6 @@ function buildRetrievalQuery(userInput: string, encounter: Encounter | null): st
   
   // Join with spaces and remove duplicates
   const query = parts.filter(Boolean).join(" ");
-  console.log('[RETRIEVAL] Clean search query:', query);
   return query || "General consultation";
 }
 
@@ -157,12 +241,13 @@ export function AfiaAssistant() {
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [patient, setPatient] = useState<Patient | null>(null);
   const [input, setInput] = useState("");
-  const [isLocalMatch, setIsLocalMatch] = useState(false);
-  const [isVerifiedProtocol, setIsVerifiedProtocol] = useState(false); // True only for direct GHS protocol matches
+  const [retrievalProviders, setRetrievalProviders] = useState<string[]>([]);
+  const [retrievalCitations, setRetrievalCitations] = useState<string[]>([]);
+  const [qdrantUnavailable, setQdrantUnavailable] = useState(false);
+  const [analysisStage, setAnalysisStage] = useState<"retrieval" | "reasoning">("retrieval");
   const [structuredResponse, setStructuredResponse] = useState<StructuredClinicalResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [protocolContextText, setProtocolContextText] = useState("None"); // Add state for protocol context
   const [error, setError] = useState<string | null>(null);
   const autoSentForEncounterRef = useRef<string | null>(null);
 
@@ -188,7 +273,7 @@ export function AfiaAssistant() {
     startDate: new Date().toISOString().split('T')[0],
   });
 
-  const { getClinicalContext, isReady: brainReady } = useClinicalBrain();
+  const { getClinicalMatches } = useClinicalBrain();
   const { searchKnowledge, isLoading: kbLoading } = useKnowledgeBase();
 
   // Check interactions when new drug name changes
@@ -254,6 +339,10 @@ export function AfiaAssistant() {
 
       setError(null);
       setStructuredResponse(null);
+      setRetrievalProviders([]);
+      setRetrievalCitations([]);
+      setQdrantUnavailable(false);
+      setAnalysisStage("retrieval");
       setIsLoading(true);
 
       let enhancedPrompt = "";
@@ -298,50 +387,60 @@ export function AfiaAssistant() {
         // Build CLEAN search query (diagnosis/complaint only) for accurate search
         const retrievalQuery = buildRetrievalQuery(query, encounter);
         let hasMatch = false;
-        let isTrueProtocolMatch = false; // Distinguish true matches from aggressive fallback
         let protocolContextText = "None";
 
-        console.log('[STAGE 1] Starting protocol retrieval for:', retrievalQuery, '| jurisdiction:', clinicCountryCode);
+        console.log('[STAGE 1] Starting parallel local and hosted retrieval for jurisdiction:', clinicCountryCode);
 
-        // PRIORITY 1: Local Keyword Search (Fast, Deterministic)
-        console.log('[STAGE 1] Attempting keyword search...');
-        const keywordProtocols = await searchKnowledge(retrievalQuery, 5, clinicCountryCode);
-        
-        if (keywordProtocols.length > 0) {
-          hasMatch = true;
-          isTrueProtocolMatch = true;
-          protocolContextText = formatKnowledgeForAI(keywordProtocols, clinicCountryCode).trim();
-          console.log('[STAGE 1] ✓ Protocol found via keyword search:', keywordProtocols.length, 'chunks');
-        } else {
-          console.log('[STAGE 1] Keyword search returned empty, trying vector search...');
-          
-          // PRIORITY 2: Vector Search (Semantic, requires Worker)
-          try {
-            console.log('[STAGE 1] Attempting vector search...');
-            // Add timeout to prevent hanging if worker is slow/broken
-            const context = await Promise.race([
-              getClinicalContext(retrievalQuery, 3, clinicCountryCode),
-              new Promise<string>((_, reject) =>
-                setTimeout(() => reject(new Error("Vector search timeout")), 8000)
-              ),
-            ]);
-            
-            if (context && context.trim().length > 0) {
-              hasMatch = true;
-              isTrueProtocolMatch = true;
-              protocolContextText = context.trim();
-              console.log('[STAGE 1] ✓ Protocol found via vector search, length:', context.length);
-            } else {
-              console.log('[STAGE 1] ⚠ Vector search returned empty');
-            }
-          } catch (ctxErr: any) {
-            console.warn('[STAGE 1] ⚠ Vector search failed:', ctxErr.message);
-            // Continue to fallback
-          }
+        // Qdrant receives only the complaint-focused query, never the patient encounter context.
+        const qdrantQuery = removePatientIdentifiers(retrievalQuery, patient, encounter).slice(0, 500);
+        const qdrantController = new AbortController();
+        const qdrantSearch = qdrantQuery.length < 3
+          ? Promise.resolve({ results: [], unavailable: false })
+          : (() => {
+              const qdrantTimeout = setTimeout(() => qdrantController.abort(), REMOTE_RETRIEVAL_TIMEOUT_MS);
+              return afiaAPI.queryKnowledge(qdrantQuery, {
+                topK: 5,
+                countryCode: clinicCountryCode,
+                signal: qdrantController.signal,
+              }).then((response) => {
+                if (response.data) return { results: response.data.results, unavailable: false };
+                console.warn('[STAGE 1] Qdrant unavailable:', response.error || response.status);
+                return { results: [], unavailable: true };
+              }).catch((retrievalError) => {
+                console.warn('[STAGE 1] Qdrant retrieval failed:', retrievalError);
+                return { results: [], unavailable: true };
+              }).finally(() => clearTimeout(qdrantTimeout));
+            })();
+
+        const localKeywordSearch = withTimeout(
+          searchKnowledge(retrievalQuery, 5, clinicCountryCode),
+          LOCAL_RETRIEVAL_TIMEOUT_MS,
+          "Local keyword search timed out"
+        ).catch((retrievalError) => {
+          console.warn('[STAGE 1] Local keyword retrieval failed:', retrievalError);
+          return [];
+        });
+
+        const [keywordProtocols, qdrantResponse] = await Promise.all([
+          localKeywordSearch,
+          qdrantSearch,
+        ]);
+        setQdrantUnavailable(qdrantResponse.unavailable);
+        let retrieved = mergeRetrievedKnowledge(keywordProtocols, [], qdrantResponse.results, clinicCountryCode);
+        if (retrieved.chunks.length === 0) {
+          const semanticMatches = await withTimeout(
+            getClinicalMatches(retrievalQuery, 5, clinicCountryCode),
+            LOCAL_RETRIEVAL_TIMEOUT_MS,
+            "Local semantic search timed out"
+          ).catch((retrievalError) => {
+            console.warn('[STAGE 1] Local semantic retrieval failed:', retrievalError);
+            return [];
+          });
+          retrieved = mergeRetrievedKnowledge(keywordProtocols, semanticMatches, qdrantResponse.results, clinicCountryCode);
         }
         
         // AGGRESSIVE FALLBACK: If still no match, try searching for common conditions and vital-driven cues
-        if (!hasMatch && encounter) {
+        if (retrieved.chunks.length === 0 && encounter) {
           console.log('[STAGE 1] → Trying aggressive fallback for common conditions...');
           
           const aggressiveQueries: string[] = [];
@@ -384,22 +483,28 @@ export function AfiaAssistant() {
             aggressiveQueries.push('anemia', 'malnutrition', 'underweight', 'low bmi');
           }
           
-          for (const aggressiveQuery of aggressiveQueries) {
-            if (hasMatch) break;
-            console.log('[STAGE 1] Trying aggressive query:', aggressiveQuery);
-            const aggressiveResults = await searchKnowledge(aggressiveQuery, 3, clinicCountryCode);
-            if (aggressiveResults.length > 0) {
-              hasMatch = true;
-              protocolContextText = formatKnowledgeForAI(aggressiveResults, clinicCountryCode).trim();
-              console.log('[STAGE 1] ✓ Protocol found via aggressive search:', aggressiveQuery);
-              break;
-            }
+          const aggressiveSearches = await Promise.all(
+            aggressiveQueries.slice(0, 5).map((aggressiveQuery) =>
+              withTimeout(
+                searchKnowledge(aggressiveQuery, 3, clinicCountryCode),
+                LOCAL_RETRIEVAL_TIMEOUT_MS,
+                "Targeted local search timed out"
+              ).catch(() => [])
+            )
+          );
+          const aggressiveResults = aggressiveSearches.find((results) => results.length > 0) || [];
+          if (aggressiveResults.length > 0) {
+            retrieved = mergeRetrievedKnowledge(aggressiveResults, [], [], clinicCountryCode);
           }
         }
 
-        setIsLocalMatch(hasMatch);
-        setIsVerifiedProtocol(isTrueProtocolMatch);
-        setProtocolContextText(protocolContextText);
+        hasMatch = retrieved.chunks.length > 0;
+        protocolContextText = hasMatch
+          ? formatKnowledgeForAI(retrieved.chunks, clinicCountryCode).trim()
+          : "None";
+        setRetrievalProviders(retrieved.providers);
+        setRetrievalCitations(retrieved.citations);
+        setAnalysisStage("reasoning");
 
         // ==================== STAGE 2: REASONING (Apply to Patient) ====================
         // Build FULL encounter context for LLM reasoning (vitals, labs, demographics)
@@ -408,8 +513,9 @@ export function AfiaAssistant() {
 
         console.log('[PIPELINE SUMMARY]', {
           jurisdiction: clinicCountryCode,
-          retrievalQuery,
           hasProtocol: hasMatch,
+          retrievalProviders: retrieved.providers,
+          resultCount: retrieved.chunks.length,
           protocolLength: protocolContextText.length,
           contextLength: encounterContext.length
         });
@@ -467,7 +573,7 @@ OUTPUT: Return ONLY a valid JSON object:
   ],
   "clinicalNotes": "Clinical assessment and findings",
   "followUpInstructions": "Return date and warning signs",
-  "isDisclaimer": ${!isTrueProtocolMatch}
+  "isDisclaimer": ${!hasMatch}
 }
 
 Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If using general knowledge, be honest about it in your citations.`.trim();
@@ -576,7 +682,7 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
           structuredDrugs: drugsList,
           clinicalNotes: notesText,
           followUpInstructions: fuText,
-          isDisclaimer: typeof rawData?.isDisclaimer === "boolean" ? rawData!.isDisclaimer : !hasMatch,
+          isDisclaimer: !hasMatch || rawData?.isDisclaimer === true,
         });
       } catch (err: any) {
         console.error("[AfiaAssistant] Analysis failed:", err);
@@ -637,7 +743,7 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
         setIsLoading(false);
       }
     },
-    [encounterId, encounter, patient, getClinicalContext, searchKnowledge]
+    [encounterId, encounter, patient, getClinicalMatches, searchKnowledge, user?.clinic?.country_code, user?.country_code]
   );
 
   // Load encounter and patient when encounterId is present
@@ -894,7 +1000,9 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
                     AI DIFFERENTIAL DIAGNOSIS
                   </div>
                   <Badge variant="outline" className="bg-white text-rose-700 border-rose-200">
-                    Confidence: High
+                    {retrievalProviders.length > 0
+                      ? `Sources: ${retrievalProviders.map((provider) => provider === "Local IndexedDB" ? "Local" : provider).join(" + ")}`
+                      : "General knowledge"}
                   </Badge>
                 </CardTitle>
               </CardHeader>
@@ -952,6 +1060,12 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-4 space-y-4">
+                {structuredResponse.treatment?.trim() && (
+                  <p className="text-sm leading-relaxed text-slate-700">
+                    {structuredResponse.treatment}
+                  </p>
+                )}
+
                 {/* Drug List */}
                 <div className="space-y-3">
                   {editedDrugs.map((drug) => (
@@ -1139,19 +1253,30 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
 
             {/* Disclaimer Footer */}
             <div className="pb-8">
+               {qdrantUnavailable && (
+                 <div className="mb-3 flex gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs leading-relaxed" role="status">
+                   <AlertTriangle className="h-4 w-4 shrink-0" />
+                   <p>Online guideline search is unavailable. This assessment used local references where available, or general guidance.</p>
+                 </div>
+               )}
                {structuredResponse.isDisclaimer ? (
                  <div className="flex gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs leading-relaxed">
                    <AlertTriangle className="h-4 w-4 shrink-0" />
                    <p>
-                     <strong>Guidance Only:</strong> No specific national protocol was found for this exact presentation. 
-                     This advice is based on general medical knowledge. Please verify all dosages and treatments.
+                     <strong>Guidance Only:</strong> {retrievalCitations.length === 0
+                       ? "No matching national guideline was retrieved; this response may rely on general medical knowledge."
+                       : "This response includes general guidance alongside the retrieved sources listed here."}
+                     {retrievalCitations.length > 0 && (
+                       <> Retrieved sources: {retrievalCitations.join("; ")}.</>
+                     )}
+                     {" "}Verify protocol applicability, contraindications, and all dosages before treatment.
                    </p>
                  </div>
                ) : (
                  <div className="flex gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs leading-relaxed">
                    <ShieldCheck className="h-4 w-4 shrink-0" />
                    <p>
-                     <strong>Verified Protocol:</strong> This guidance is based on national standard treatment guidelines for {user?.country_code === 'ZW' ? 'Zimbabwe (EDLIZ)' : 'Ghana (GHS STG)'}.
+                     <strong>Retrieved guideline context:</strong> {retrievalCitations.join("; ")}. Confirm that it applies to this patient and your current local protocol.
                    </p>
                  </div>
                )}
@@ -1192,9 +1317,13 @@ Note: Set isDisclaimer to true ONLY if no national protocols were retrieved. If 
               </div>
             </div>
             <div className="text-center space-y-2">
-              <h3 className="font-bold text-slate-900">Analyzing Clinical Data...</h3>
+              <h3 className="font-bold text-slate-900">
+                {analysisStage === "retrieval" ? "Searching Clinical References..." : "Applying Retrieved Guidance..."}
+              </h3>
               <p className="text-sm text-slate-500">
-                Checking GHS Protocols & Patient Vitals
+                {analysisStage === "retrieval"
+                  ? "Checking the local library and connected knowledge service."
+                  : "Reviewing guideline context against the supplied patient details."}
               </p>
             </div>
           </div>

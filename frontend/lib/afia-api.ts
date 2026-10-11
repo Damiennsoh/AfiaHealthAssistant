@@ -36,8 +36,21 @@ function getRetryDelay(retryCount: number): number {
 }
 
 // Wait function
-function wait(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function wait(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise(resolve => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+
+    const timeout = setTimeout(finish, ms);
+    function finish() {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    }
+    signal?.addEventListener('abort', finish, { once: true });
+  });
 }
 
 class AfiaAPI {
@@ -165,9 +178,6 @@ class AfiaAPI {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    console.log('[AfiaAPI] Request headers:', headers);
-    console.log('[AfiaAPI] Request body:', options.body);
-
     try {
       const response = await fetch(url, {
         ...options,
@@ -200,7 +210,8 @@ class AfiaAPI {
         const retryAfter = response.headers.get('Retry-After');
         const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : getRetryDelay(retryCount);
         console.warn(`Rate limited, retrying after ${delay}ms`);
-        await wait(delay);
+        await wait(delay, options.signal);
+        if (options.signal?.aborted) return { error: 'Request aborted', status: 0 };
         return this.request(endpoint, options, retryCount + 1);
       }
 
@@ -226,9 +237,13 @@ class AfiaAPI {
         status: response.status,
       };
     } catch (error) {
+      if (options.signal?.aborted) {
+        return { error: 'Request aborted', status: 0 };
+      }
       if (retryCount < MAX_RETRIES) {
         console.warn(`Request failed, retrying (${retryCount + 1}/${MAX_RETRIES}):`, error);
-        await wait(getRetryDelay(retryCount));
+        await wait(getRetryDelay(retryCount), options.signal);
+        if (options.signal?.aborted) return { error: 'Request aborted', status: 0 };
         return this.request(endpoint, options, retryCount + 1);
       }
       console.error('API request failed:', error);
@@ -502,15 +517,10 @@ class AfiaAPI {
       topK?: number;
       includeMetadata?: boolean;
       countryCode?: 'GH' | 'ZW'; // Override country for this query
+      signal?: AbortSignal;
     }
   ) {
-    // Temporarily override country if specified
-    const originalCountry = this.countryCode;
-    if (options?.countryCode) {
-      this.countryCode = options.countryCode;
-    }
-
-    const response = await this.request<{
+    return this.request<{
       country_code: string;
       knowledge_base: string;
       query: string;
@@ -532,12 +542,9 @@ class AfiaAPI {
         top_k: options?.topK || 10,
         include_metadata: options?.includeMetadata !== false,
       }),
+      headers: options?.countryCode ? { 'X-Country-Code': options.countryCode } : undefined,
+      signal: options?.signal,
     });
-
-    // Restore original country
-    this.countryCode = originalCountry;
-
-    return response;
   }
 
   async getKnowledgeBaseInfo(countryCode?: 'GH' | 'ZW') {
