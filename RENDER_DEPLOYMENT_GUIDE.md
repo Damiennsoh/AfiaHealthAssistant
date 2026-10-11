@@ -91,7 +91,7 @@ MINIO_SECURE=true
 
 # API
 API_PORT=8000
-CORS_ORIGINS=https://app.afia.health,https://afia.health
+CORS_ORIGINS=https://afia-health-assistant-bw-lilac.vercel.app,https://app.afia.health,https://afia.health
 
 # Admin (for initial setup)
 ADMIN_EMAIL=admin@afia.health

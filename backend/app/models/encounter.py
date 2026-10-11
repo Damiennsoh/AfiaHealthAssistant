@@ -100,6 +100,7 @@ class Encounter(BaseModel):
     offline_id = Column(String(100), nullable=True, index=True)
     last_sync_at = Column(DateTime(timezone=True), nullable=True)
     sync_version = Column(Integer, default=1)
+    offline_payload = Column(JSONB, nullable=True)
 
     # Relationships
     clinic = relationship("Clinic", back_populates="encounters")
@@ -120,3 +121,39 @@ class Encounter(BaseModel):
             },
             "prescriptions": self.prescriptions,
         }
+
+    def to_offline_dict(self) -> dict:
+        """Return the original device shape with server version metadata."""
+        payload = dict(self.offline_payload or {})
+        patient_ref = payload.get("patientId")
+        if not patient_ref:
+            try:
+                patient_ref = self.patient.offline_id if self.patient and self.patient.offline_id else str(self.patient_id)
+            except Exception:
+                patient_ref = str(self.patient_id)
+
+        if not payload:
+            payload = {
+                "vitals": self.vitals or {},
+                "symptoms": [],
+                "history": self.subjective or "",
+                "diagnosis": self.primary_diagnosis_name or "",
+                "treatment": self.plan or "",
+                "drugs": self.prescriptions or [],
+                "labResults": self.lab_orders or [],
+                "notes": self.objective or "",
+                "status": "completed" if self.status == EncounterStatus.COMPLETED else "in-progress",
+            }
+
+        payload.update({
+            "id": self.offline_id or str(self.id),
+            "serverId": str(self.id),
+            "offlineId": self.offline_id,
+            "patientId": patient_ref,
+            "date": payload.get("date") or (self.encounter_date.isoformat() if self.encounter_date else None),
+            "createdAt": payload.get("createdAt") or (self.created_at.isoformat() if self.created_at else None),
+            "updatedAt": self.updated_at.isoformat() if self.updated_at else payload.get("updatedAt"),
+            "syncVersion": self.sync_version,
+            "isDeleted": bool(payload.get("isDeleted", False)),
+        })
+        return payload

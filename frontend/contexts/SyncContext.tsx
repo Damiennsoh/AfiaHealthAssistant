@@ -72,6 +72,17 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     queuedPatientIds.current.clear();
     queuedEncounterIds.current.clear();
     syncService.setClinicScope(String(user.clinic_id));
+
+    // Proactively pull latest records from server on login / scope change
+    syncService.pullAndReconcile().then(result => {
+      console.log(`[Sync] 📥 Initial login pull: ${result.pulledPatients} patients, ${result.pulledEncounters} encounters`);
+      if (result.pulledPatients > 0 || result.pulledEncounters > 0) {
+        setLastSync(new Date());
+      }
+    }).catch(err => {
+      console.warn('[Sync] Initial login pull warning:', err);
+    });
+
     syncService.startAutoSync(30000);
     return () => syncService.stopAutoSync();
   }, [user, isGuestMode]);

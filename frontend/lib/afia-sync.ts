@@ -6,6 +6,7 @@
 
 import { afiaAPI } from './afia-api';
 import { OfflineSyncManager } from '@/lib/sync-manager';
+import { patientDB, encounterDB } from './db';
 
 interface SyncChange {
   id: string;
@@ -267,7 +268,7 @@ class SyncService {
   }
 
   /**
-   * Perform sync with server
+   * Perform sync with server (push pending changes, then pull and reconcile remote changes)
    */
   async sync(): Promise<{ synced: number; failed: number; conflicts: number }> {
     if (!this.clinicScopeReady || !this.isOnline) {
@@ -280,7 +281,8 @@ class SyncService {
     );
 
     if (pending.length === 0) {
-      return { synced: 0, failed: 0, conflicts: 0 };
+      const pullRes = await this.pullAndReconcile();
+      return { synced: pullRes.pulledPatients + pullRes.pulledEncounters, failed: 0, conflicts: pullRes.conflicts };
     }
 
     console.log(`Syncing ${pending.length} changes...`);
@@ -302,7 +304,7 @@ class SyncService {
         entity_type: (c.resourceType === 'patient' ? 'patient' : 'encounter') as 'patient' | 'encounter',
         entity_server_id: null, // Will be assigned by server
         payload: c.payload,
-        payload_version: 1,
+        payload_version: c.payload?.syncVersion || 1,
         created_at: new Date(c.timestamp).toISOString(),
       }));
 
@@ -314,24 +316,32 @@ class SyncService {
 
       if (response.data && Array.isArray(response.data)) {
         // Process results
-        response.data.forEach((result: any, index: number) => {
+        for (let index = 0; index < response.data.length; index++) {
+          const result = response.data[index];
           const change = pending[index];
           if (result.status === 'acknowledged') {
             change.status = 'synced';
             synced++;
           } else if (result.status === 'conflict_resolved_server_wins') {
-            change.status = 'conflict';
+            change.status = 'synced';
             conflicts++;
+            if (result.server_payload) {
+              if (change.resourceType === 'patient') {
+                await patientDB.save(result.server_payload as any);
+              } else if (change.resourceType === 'encounter') {
+                await encounterDB.save(result.server_payload as any);
+              }
+            }
           } else {
             change.status = 'failed';
             change.retryCount++;
             change.error = result.error || 'Sync failed';
             failed++;
           }
-        });
+        }
 
         this.queue.lastSync = Date.now();
-        console.log(`Sync complete: ${synced} changes synced`);
+        console.log(`Sync push complete: ${synced} changes synced`);
       } else {
         throw new Error('Invalid response from server');
       }
@@ -354,6 +364,16 @@ class SyncService {
     }
 
     this.saveQueue();
+
+    // Pull any new changes created or modified by other devices
+    try {
+      const pullResult = await this.pullAndReconcile();
+      synced += pullResult.pulledPatients + pullResult.pulledEncounters;
+      conflicts += pullResult.conflicts;
+    } catch (pullError) {
+      console.error('Post-push pull error:', pullError);
+    }
+
     return { synced, failed, conflicts };
   }
 
@@ -370,33 +390,148 @@ class SyncService {
   }
 
   /**
-   * Pull pending changes from server (for multi-device sync)
+   * Pull pending changes from server and reconcile with local IndexedDB.
+   * Ensures data from another device does not overwrite newer local edits,
+   * while populating missing or updated records on this device.
    */
-  async pull(): Promise<SyncChange[]> {
-    if (!this.clinicScopeReady || !this.isOnline) return [];
+  async pullAndReconcile(): Promise<{ pulledPatients: number; pulledEncounters: number; conflicts: number }> {
+    if (!this.clinicScopeReady || !this.isOnline) {
+      return { pulledPatients: 0, pulledEncounters: 0, conflicts: 0 };
+    }
+
+    let pulledPatients = 0;
+    let pulledEncounters = 0;
+    let conflicts = 0;
 
     try {
       const lastSyncAt = this.queue.lastSync ? new Date(this.queue.lastSync).toISOString() : null;
       const response = await afiaAPI.pullSyncChanges(this.queue.deviceId, lastSyncAt);
 
-      if (response.data && (response.data as any).items) {
-        console.log(`Pulled ${(response.data as any).items.length} changes from server`);
-        // Convert server items to sync changes format
-        return (response.data as any).items.map((item: any) => ({
-          id: `pull_${item.offline_id}`,
-          action: 'create' as const,
-          resourceType: item.entity_type === 'patient' ? 'patient' : 'encounter',
-          resourceId: item.offline_id,
-          payload: item.payload,
-          timestamp: Date.now(),
-          retryCount: 0,
-          status: 'synced' as const,
-        }));
+      if (!response.data || !Array.isArray((response.data as any).items)) {
+        return { pulledPatients: 0, pulledEncounters: 0, conflicts: 0 };
       }
+
+      const items: any[] = (response.data as any).items;
+      console.log(`[Sync] Pulled ${items.length} records from server for clinic`);
+
+      // 1. Reconcile patients
+      const patientItems = items.filter(it => it.entity_type === 'patient');
+      for (const item of patientItems) {
+        const payload = item.payload;
+        if (!payload || !payload.id) continue;
+
+        const pendingChange = this.queue.changes.find(
+          c => c.resourceType === 'patient' &&
+               (c.resourceId === payload.id || c.payload?.id === payload.id || (payload.folderNumber && c.payload?.folderNumber === payload.folderNumber)) &&
+               (c.status === 'pending' || c.status === 'syncing')
+        );
+
+        const existingById = await patientDB.getById(payload.id);
+        const folderMatches = !existingById && payload.folderNumber
+          ? await patientDB.getByFolderNumber(payload.folderNumber)
+          : [];
+        const existing = existingById || (Array.isArray(folderMatches) && folderMatches.length > 0 ? folderMatches[0] : null);
+
+        if (existing && existing.id) {
+          if (pendingChange) {
+            const localPendingTime = new Date(pendingChange.payload?.updatedAt || pendingChange.timestamp).getTime();
+            const serverTime = new Date(payload.updatedAt || item.created_at || 0).getTime();
+
+            if (localPendingTime > serverTime) {
+              // Local pending edit is newer — keep local data to prevent corruption
+              console.log(`[Sync] Keeping newer local edit for patient ${payload.id}`);
+              conflicts++;
+              continue;
+            } else {
+              // Server is newer or equal: server wins
+              pendingChange.status = 'synced';
+              if (existing.id !== payload.id) {
+                await patientDB.delete(existing.id);
+              }
+              await patientDB.save(payload);
+              pulledPatients++;
+            }
+          } else {
+            const localTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+            const serverTime = new Date(payload.updatedAt || payload.createdAt || 0).getTime();
+            const serverVersion = item.payload_version || payload.syncVersion || 1;
+            const localVersion = existing.syncVersion || 1;
+
+            if (serverTime >= localTime || serverVersion >= localVersion) {
+              if (existing.id !== payload.id) {
+                await patientDB.delete(existing.id);
+              }
+              await patientDB.save(payload);
+              pulledPatients++;
+            }
+          }
+        } else {
+          // Fresh record from another device (e.g., registered on desktop, pulled on mobile)
+          await patientDB.save(payload);
+          pulledPatients++;
+        }
+      }
+
+      // 2. Reconcile encounters
+      const encounterItems = items.filter(it => it.entity_type === 'encounter');
+      for (const item of encounterItems) {
+        const payload = item.payload;
+        if (!payload || !payload.id) continue;
+
+        const pendingChange = this.queue.changes.find(
+          c => c.resourceType === 'encounter' &&
+               (c.resourceId === payload.id || c.payload?.id === payload.id) &&
+               (c.status === 'pending' || c.status === 'syncing')
+        );
+
+        const existing = await encounterDB.getById(payload.id);
+
+        if (existing) {
+          if (pendingChange) {
+            const localPendingTime = new Date(pendingChange.payload?.updatedAt || pendingChange.timestamp).getTime();
+            const serverTime = new Date(payload.updatedAt || item.created_at || 0).getTime();
+
+            if (localPendingTime > serverTime) {
+              console.log(`[Sync] Keeping newer local edit for encounter ${payload.id}`);
+              conflicts++;
+              continue;
+            } else {
+              pendingChange.status = 'synced';
+              await encounterDB.save(payload);
+              pulledEncounters++;
+            }
+          } else {
+            const localTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+            const serverTime = new Date(payload.updatedAt || payload.createdAt || 0).getTime();
+            const serverVersion = item.payload_version || payload.syncVersion || 1;
+            const localVersion = existing.syncVersion || 1;
+
+            if (serverTime >= localTime || serverVersion >= localVersion) {
+              await encounterDB.save(payload);
+              pulledEncounters++;
+            }
+          }
+        } else {
+          // Fresh encounter created on another device
+          await encounterDB.save(payload);
+          pulledEncounters++;
+        }
+      }
+
+      this.queue.lastSync = Date.now();
+      this.saveQueue();
     } catch (error) {
-      console.error('Pull failed:', error);
+      console.error('[Sync] pullAndReconcile failed:', error);
     }
 
+    return { pulledPatients, pulledEncounters, conflicts };
+  }
+
+  /**
+   * Pull pending changes from server (for multi-device sync)
+   */
+  async pull(): Promise<SyncChange[]> {
+    const result = await this.pullAndReconcile();
     return [];
   }
 

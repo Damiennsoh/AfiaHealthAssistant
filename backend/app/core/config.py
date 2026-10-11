@@ -74,7 +74,7 @@ class Settings(BaseSettings):
 
     # ── API ──────────────────────────────────────────────────
     api_port: int = Field(default=8000)
-    cors_origins: str = Field(default="http://localhost:3000,https://afiahealthassistant-1j.vercel.app")
+    cors_origins: str = Field(default="http://localhost:3000,https://afiahealthassistant-1j.vercel.app,https://afia-health-assistant-bw-lilac.vercel.app,https://app.afia.health,https://afia.health")
 
     @property
     def cors_origins_list(self) -> List[str]:

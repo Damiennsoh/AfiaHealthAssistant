@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { afiaAPI } from '@/lib/afia-api'
 import { isGuestEmail, activateAdminDB, activateClinicDB, activateGuestDB, activateProdDB } from '@/lib/guest-mode'
 import { clearActiveCacheKey, initializeActiveCacheKey } from '@/lib/db'
+import { syncService } from '@/lib/afia-sync'
 
 // Define the Auth Context State shape
 interface AuthContextType {
@@ -234,6 +235,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(freshToken)
       // Also set token in localStorage for API calls
       localStorage.setItem('afia_access_token', freshToken)
+
+      if (!isGuestEmail(freshUser?.email) && freshUser?.clinic_id) {
+        try {
+          syncService.setClinicScope(String(freshUser.clinic_id))
+          syncService.pullAndReconcile().catch(err => {
+            console.warn('[AuthContext] Post-login sync pull failed:', err)
+          })
+        } catch (syncErr) {
+          console.warn('[AuthContext] Post-login sync scope error:', syncErr)
+        }
+      }
 
     } else {
       console.log("[AuthContext] Device is offline. Querying local database for cached credentials...")

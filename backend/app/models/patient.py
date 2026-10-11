@@ -43,9 +43,13 @@ class Patient(BaseModel):
     name_encrypted = Column(Text, nullable=False)  # Full name
     date_of_birth = Column(Date, nullable=True)
     gender = Column(Enum(Gender), nullable=True)
+    age_years = Column(Integer, nullable=True)
     phone_encrypted = Column(Text, nullable=True)  # Mobile number
     address_encrypted = Column(Text, nullable=True)  # Home address
     emergency_contact_encrypted = Column(Text, nullable=True)  # Name + phone
+    region = Column(String(120), nullable=True)
+    community = Column(String(160), nullable=True)
+    locality = Column(String(255), nullable=True)
 
     # Non-encrypted (safe to query)
     insurance_type = Column(Enum(InsuranceType), default=InsuranceType.CASH)
@@ -72,7 +76,7 @@ class Patient(BaseModel):
     def get_age(self) -> int:
         """Calculate patient age from date of birth."""
         if not self.date_of_birth:
-            return 0
+            return self.age_years or 0
         today = datetime.now(timezone.utc).date()
         return today.year - self.date_of_birth.year - (
             (today.month, today.day) < (self.date_of_birth.month, self.date_of_birth.day)
@@ -81,20 +85,32 @@ class Patient(BaseModel):
     def to_offline_dict(self) -> dict:
         """Serialize for offline PWA cache (includes decrypted fields)."""
         from app.core.security import decrypt_field
+        insurance_type = self.insurance_type.value if self.insurance_type else "cash"
+        insurance_number = self.insurance_number
         return {
-            "id": str(self.id),
-            "offline_id": self.offline_id,
-            "folder_number": self.folder_number,
+            "id": self.offline_id or str(self.id),
+            "serverId": str(self.id),
+            "offlineId": self.offline_id,
+            "folderNumber": self.folder_number,
             "name": decrypt_field(self.name_encrypted),
-            "date_of_birth": self.date_of_birth.isoformat() if self.date_of_birth else None,
-            "gender": self.gender.value if self.gender else None,
+            "dateOfBirth": self.date_of_birth.isoformat() if self.date_of_birth else None,
+            "age": self.get_age(),
+            "sex": self.gender.value if self.gender else "other",
             "phone": decrypt_field(self.phone_encrypted),
             "address": decrypt_field(self.address_encrypted),
-            "emergency_contact": decrypt_field(self.emergency_contact_encrypted),
-            "insurance_type": self.insurance_type.value if self.insurance_type else None,
-            "insurance_number": self.insurance_number,
-            "blood_type": self.blood_type,
+            "emergencyContact": decrypt_field(self.emergency_contact_encrypted),
+            "hasInsurance": insurance_type != "cash",
+            "hasNHIS": insurance_type == "nhis",
+            "nhisNumber": insurance_number if insurance_type == "nhis" else None,
+            "medicalAidNumber": insurance_number if insurance_type != "nhis" else None,
+            "bloodType": self.blood_type,
             "allergies": self.allergies,
-            "chronic_conditions": self.chronic_conditions,
-            "sync_version": self.sync_version,
+            "chronicConditions": self.chronic_conditions,
+            "region": self.region or "",
+            "community": self.community or "",
+            "locality": self.locality or "",
+            "createdAt": self.registered_at.isoformat() if self.registered_at else None,
+            "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
+            "syncVersion": self.sync_version,
+            "isDeleted": not self.is_active,
         }

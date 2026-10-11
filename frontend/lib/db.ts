@@ -30,6 +30,9 @@ export interface Patient {
   phone: string;
   createdAt: string;
   updatedAt: string;
+  syncVersion?: number;
+  serverId?: string;
+  offlineId?: string;
   // Soft Delete fields
   deleted?: boolean; // Legacy/Compat
   isDeleted?: boolean;
@@ -108,6 +111,9 @@ export interface Encounter {
   status: "in-progress" | "completed";
   createdAt: string;
   updatedAt: string;
+  syncVersion?: number;
+  serverId?: string;
+  offlineId?: string;
   referralData?: any; // Optional referral data
   deleted?: boolean;
   isDeleted?: boolean;
