@@ -4,6 +4,7 @@ RAG query with country switching. SaaS mode only.
 Offline clinics use client-side search (PWA).
 """
 from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -29,15 +30,19 @@ async def query_knowledge(
     For offline clinics, this endpoint is not used — 
     the PWA performs client-side cosine similarity search.
     """
-    # Auto-set country from user's clinic
-    if not query_data.country_code:
-        query_data.country_code = current_user.clinic.country_code if current_user.clinic else "GH"
+    # The authenticated clinic is authoritative; never trust a client-supplied jurisdiction.
+    clinic_country_code = str(
+        (current_user.clinic.country_code if current_user.clinic else None) or "GH"
+    ).upper()
+    if clinic_country_code not in {"GH", "ZW"}:
+        raise HTTPException(status_code=400, detail="Unsupported clinic jurisdiction")
+    query_data.country_code = clinic_country_code
 
     # Verify clinic has active subscription
     if current_user.clinic and not current_user.clinic.is_active:
         raise HTTPException(status_code=403, detail="Clinic subscription inactive")
 
-    rag_service = RAGService()
+    rag_service = await run_in_threadpool(RAGService)
     result = await rag_service.query(query_data)
 
     # Audit log

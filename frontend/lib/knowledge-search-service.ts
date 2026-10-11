@@ -7,8 +7,11 @@ type SearchResult = KnowledgeChunk & { _score: number; _vScore: number; _kScore:
 
 class KnowledgeSearchService {
   private worker: Worker | null = null;
-  private pendingRequests: Map<string, { resolve: (data: any) => void; reject: (err: any) => void }> = new Map();
+  private pendingRequests = new Map<string, { resolve: (data: SearchResult[]) => void; reject: (err: Error) => void }>();
+  private readyWaiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
   private isReady = false;
+  private workerError: Error | null = null;
+  private requestSequence = 0;
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -26,36 +29,33 @@ class KnowledgeSearchService {
 
       if (type === "READY") {
         this.isReady = true;
+        this.workerError = null;
+        this.readyWaiters.splice(0).forEach(({ resolve }) => resolve());
         console.log(`[KnowledgeSearchService] Worker ready with ${count} chunks`);
       } else if (type === "RESULTS") {
-        // Resolve the specific promise for this search
-        // (For now, we assume single-threaded request/response for simplicity, 
-        // or just use the last pending request if we don't implement full ID tracking)
-        // A simple queue system:
-        const request = this.pendingRequests.get("latest");
+        const request = this.pendingRequests.get(requestId);
         if (request) {
           request.resolve(results);
-          this.pendingRequests.delete("latest");
+          this.pendingRequests.delete(requestId);
         }
       } else if (type === "ERROR") {
         console.error("[KnowledgeSearchService] Worker Error:", error);
-        const request = this.pendingRequests.get("latest");
-        if (request) {
-            const errorMsg = error.message || error;
-            request.reject(new Error(`Knowledge search worker error: ${errorMsg}`));
-            this.pendingRequests.delete("latest");
-        }
+        const workerError = new Error(`Knowledge search worker error: ${error?.message || error}`);
+        this.workerError = workerError;
+        this.readyWaiters.splice(0).forEach(({ reject }) => reject(workerError));
+        this.pendingRequests.forEach(({ reject }) => reject(workerError));
+        this.pendingRequests.clear();
       }
     };
 
     // Handle worker initialization errors
     this.worker.onerror = (event: ErrorEvent) => {
       console.error("[KnowledgeSearchService] Worker Error Event:", event.message, event.filename, event.lineno);
-      const request = this.pendingRequests.get("latest");
-      if (request) {
-        request.reject(new Error(`Worker error: ${event.message}`));
-        this.pendingRequests.delete("latest");
-      }
+      const workerError = new Error(`Worker error: ${event.message}`);
+      this.workerError = workerError;
+      this.readyWaiters.splice(0).forEach(({ reject }) => reject(workerError));
+      this.pendingRequests.forEach(({ reject }) => reject(workerError));
+      this.pendingRequests.clear();
     };
 
     // Initialize data load
@@ -65,19 +65,30 @@ class KnowledgeSearchService {
   public async search(query: string, maxResults = 5, countryCode?: 'GH' | 'ZW'): Promise<SearchResult[]> {
     if (!this.worker) this.initWorker();
 
+    if (!this.isReady) {
+      if (this.workerError) throw this.workerError;
+      await new Promise<void>((resolve, reject) => {
+        this.readyWaiters.push({ resolve, reject });
+      });
+    }
+
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set("latest", { resolve, reject });
+      const requestId = `search-${++this.requestSequence}`;
+      this.pendingRequests.set(requestId, { resolve, reject });
 
       this.worker?.postMessage({
         type: "SEARCH",
         query,
         maxResults,
-        countryCode
+        countryCode,
+        requestId,
       });
     });
   }
 
   public refresh() {
+    this.isReady = false;
+    this.workerError = null;
     this.worker?.postMessage({ type: "REFRESH" });
   }
 

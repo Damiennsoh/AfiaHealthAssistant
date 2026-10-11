@@ -8,6 +8,7 @@ from typing import List, Optional, Dict, Any
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue, Distance, VectorParams, PointStruct
 from sentence_transformers import SentenceTransformer
+from fastapi.concurrency import run_in_threadpool
 
 from app.core.config import get_settings, get_country_config, get_qdrant_collection
 from app.core.exceptions import KnowledgeBaseError
@@ -55,14 +56,19 @@ class RAGService:
             raise KnowledgeBaseError(f"Unknown country code: {country_code}")
 
         # Generate query embedding
-        query_embedding = self.model.encode(query_data.query, normalize_embeddings=True)
+        query_embedding = await run_in_threadpool(
+            self.model.encode,
+            query_data.query,
+            normalize_embeddings=True,
+        )
 
         # Build Qdrant filter from metadata filters
         qdrant_filter = self._build_filter(country_code, query_data.filters)
 
         # Search Qdrant
         try:
-            search_result = self.qdrant.search(
+            search_result = await run_in_threadpool(
+                self.qdrant.search,
                 collection_name=self.collection_name,
                 query_vector=query_embedding.tolist(),
                 query_filter=qdrant_filter,

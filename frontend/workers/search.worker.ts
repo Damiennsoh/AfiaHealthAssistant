@@ -6,11 +6,10 @@
 type SearchMessage = 
   | { type: 'INIT' }
   | { type: 'REFRESH' }
-  | { type: 'SEARCH'; query: string; vector?: number[]; maxResults?: number; countryCode?: 'GH' | 'ZW' };
-
+  | { type: 'SEARCH'; query: string; vector?: number[]; maxResults?: number; countryCode?: 'GH' | 'ZW'; requestId?: string };
 type WorkerResponse = 
   | { type: 'READY'; count: number }
-  | { type: 'RESULTS'; results: any[] }
+  | { type: 'RESULTS'; results: any[]; requestId?: string }
   | { type: 'ERROR'; error: string };
 
 // --- In-Memory Cache ---
@@ -164,12 +163,12 @@ self.onmessage = async (e: MessageEvent<SearchMessage>) => {
   else if (type === 'SEARCH') {
     // Wait if not ready (simple retry logic could be better but this works for single-user flow)
     if (!isReady) await loadData();
+    const { query, vector, maxResults = 5, countryCode, requestId } = e.data as { query: string; vector?: number[]; maxResults?: number; countryCode?: 'GH' | 'ZW'; requestId?: string };
     if (!cachedChunks.length) {
-       self.postMessage({ type: 'RESULTS', results: [] });
+      self.postMessage({ type: 'RESULTS', results: [], requestId });
        return;
     }
 
-    const { query, vector, maxResults = 5, countryCode } = e.data as { query: string; vector?: number[]; maxResults?: number; countryCode?: 'GH' | 'ZW' };
     const queryLower = query.toLowerCase();
     const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
 
@@ -223,6 +222,6 @@ self.onmessage = async (e: MessageEvent<SearchMessage>) => {
         _kScore: r.keywordScore
       }));
 
-    self.postMessage({ type: 'RESULTS', results: topResults });
+    self.postMessage({ type: 'RESULTS', results: topResults, requestId });
   }
 };

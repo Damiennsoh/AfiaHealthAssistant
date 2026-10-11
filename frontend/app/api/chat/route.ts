@@ -250,11 +250,23 @@ function validateAndNormalize(parsed: any): any {
     differentialDiagnosis = [parsed.secondaryDiagnosis.trim()];
   }
 
+  const validDrugs = structuredDrugs.filter((d: any) => typeof d.drugName === "string" && d.drugName.trim().length > 0);
+  const hasDiagnosis = Boolean(
+    diagnosisCandidate && diagnosisCandidate.toLowerCase() !== "clinical assessment pending"
+  );
+  if (
+    !hasDiagnosis ||
+    (!treatmentCandidate && validDrugs.length === 0) ||
+    !notesCandidate
+  ) {
+    return null;
+  }
+
   return {
-    diagnosis: diagnosisCandidate ?? "Clinical assessment pending",
+    diagnosis: diagnosisCandidate,
     differentialDiagnosis,
     treatment: treatmentCandidate ?? "",
-    structuredDrugs: structuredDrugs.filter((d: any) => typeof d.drugName === "string" && d.drugName.trim().length > 0),
+    structuredDrugs: validDrugs,
     clinicalNotes: notesCandidate ?? "",
     followUpInstructions: fuCandidate ?? "",
     isDisclaimer: typeof parsed.isDisclaimer === "boolean" ? parsed.isDisclaimer : true,
@@ -365,12 +377,10 @@ export async function POST(req: Request) {
       if (!parsed) {
         return new Response(
           JSON.stringify({
-            diagnosis: "Clinical assessment pending",
-            treatment: responseText.slice(0, 2000),
-            historyNote: "",
-            isDisclaimer: true,
+            error: "AI returned an empty or invalid clinical response",
+            userMessage: "The AI could not produce a complete clinical assessment. Please retry the analysis.",
           }),
-          { headers: { "Content-Type": "application/json" } }
+          { status: 502, headers: { "Content-Type": "application/json" } }
         );
       }
       return new Response(JSON.stringify(parsed), {
