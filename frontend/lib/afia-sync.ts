@@ -148,6 +148,25 @@ class SyncService {
     resourceId: string,
     payload: Record<string, any>
   ): SyncChange {
+    // Prevent duplicate queuing — if a pending/failed entry for the same
+    // resource already exists, update it in-place instead of appending.
+    const existing = this.queue.changes.find(
+      c => c.resourceType === resourceType &&
+           c.resourceId === resourceId &&
+           (c.status === 'pending' || c.status === 'failed')
+    );
+    if (existing) {
+      existing.payload = payload;
+      existing.timestamp = Date.now();
+      existing.status = 'pending';
+      existing.retryCount = 0;
+      this.saveQueue();
+      if (this.isOnline) {
+        this.sync();
+      }
+      return existing;
+    }
+
     const change: SyncChange = {
       id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       action,
@@ -248,7 +267,10 @@ class SyncService {
 
     this.stopAutoSync();
     this.intervalId = setInterval(() => {
-      if (this.isOnline && this.getPendingCount() > 0) {
+      if (this.isOnline) {
+        // Always run a full sync cycle (push pending + pull from server)
+        // so that records created on other devices are pulled even when
+        // this device has nothing pending to push.
         this.sync();
       }
     }, this.syncInterval);
