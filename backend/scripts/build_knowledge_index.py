@@ -23,6 +23,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.config import get_settings, get_country_config, get_qdrant_collection
 
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = BACKEND_ROOT.parent
+DOCUMENT_ROOT = PROJECT_ROOT if (PROJECT_ROOT / "knowledge-base").is_dir() else BACKEND_ROOT
+
 
 class MedicalDocumentParser:
     """Parse medical PDF (STG or EDLIZ) into structured chunks."""
@@ -217,17 +221,17 @@ class KnowledgeIndexBuilder:
             return
 
         # Handle multiple documents for Ghana (STG + NHIS)
-        pdf_paths = []
+        pdf_paths: list[Path] = []
         if country_code == "GH":
-            pdf_paths.append(config.get("document_path"))
+            pdf_paths.append(DOCUMENT_ROOT / config.get("document_path"))
             if config.get("document_path_nhis"):
-                pdf_paths.append(config.get("document_path_nhis"))
+                pdf_paths.append(DOCUMENT_ROOT / config.get("document_path_nhis"))
         else:
-            pdf_paths.append(config.get("document_path"))
+            pdf_paths.append(DOCUMENT_ROOT / config.get("document_path"))
 
         # Validate PDFs exist
         for pdf_path in pdf_paths:
-            if not pdf_path or not Path(pdf_path).exists():
+            if not pdf_path.exists():
                 print(f"PDF not found: {pdf_path}")
                 return
 
@@ -237,9 +241,9 @@ class KnowledgeIndexBuilder:
         all_chunks = []
         for pdf_path in pdf_paths:
             print(f"Parsing: {pdf_path}")
-            parser = MedicalDocumentParser(pdf_path)
+            parser = MedicalDocumentParser(str(pdf_path))
             chunks = parser.parse_chunks()
-            source = self._source_for_document(pdf_path, country_code, config)
+            source = self._source_for_document(str(pdf_path), country_code, config)
             for chunk in chunks:
                 chunk["metadata"]["source"] = source
                 chunk["metadata"]["citation"] = source
@@ -324,7 +328,7 @@ class KnowledgeIndexBuilder:
         offline_data["checksum"] = hashlib.sha256(json_str.encode()).hexdigest()
 
         # Save to static/knowledge directory for serving via backend
-        output_path = Path(f"static/knowledge/{country_code.lower()}-knowledge-offline.json")
+        output_path = BACKEND_ROOT / "static" / "knowledge" / f"{country_code.lower()}-knowledge-offline.json"
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_path, 'w') as f:
