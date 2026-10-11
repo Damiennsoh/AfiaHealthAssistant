@@ -49,48 +49,6 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const syncedPatientIds = useRef<Set<string>>(new Set());
   const syncedEncounterIds = useRef<Set<string>>(new Set());
 
-  // Listen to network state
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  // Auto-sync every 30 seconds when online — DISABLED for guest demo sessions
-  useEffect(() => {
-    if (!user || isGuestMode || user.role === 'super_admin' || !user.clinic_id) {
-      syncedPatientIds.current.clear();
-      syncedEncounterIds.current.clear();
-      syncService.clearClinicScope();
-      syncService.stopAutoSync();
-      return;
-    }
-    syncedPatientIds.current.clear();
-    syncedEncounterIds.current.clear();
-    syncService.setClinicScope(String(user.clinic_id));
-
-    // Proactively pull latest records from server on login / scope change.
-    // On a brand-new device the local DB is empty; the pull fetches ALL clinic
-    // records from the server (lastSync is null ➜ no timestamp filter).
-    syncService.pullAndReconcile().then(result => {
-      console.log(`[Sync] 📥 Initial login pull: ${result.pulledPatients} patients, ${result.pulledEncounters} encounters`);
-      if (result.pulledPatients > 0 || result.pulledEncounters > 0) {
-        setLastSync(new Date());
-      }
-    }).catch(err => {
-      console.warn('[Sync] Initial login pull warning:', err);
-    });
-
-    syncService.startAutoSync(30000);
-    return () => syncService.stopAutoSync();
-  }, [user, isGuestMode]);
-
   /**
    * Queue any un-synced IndexedDB records and push to backend.
    * Called by form components after saving data locally.
@@ -164,6 +122,61 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsSyncing(false);
     }
   }, [user, isOnline, isGuestMode]);
+
+  // Listen to network state and foreground visibility
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (user && !isGuestMode && user.clinic_id) {
+        syncToCloud().catch(err => console.warn('[Sync] Reconnect sync error:', err));
+      }
+    };
+    const handleOffline = () => setIsOnline(false);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine && user && !isGuestMode && user.clinic_id) {
+        syncService.pullAndReconcile().catch(err => console.warn('[Sync] Foreground pull error:', err));
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [user, isGuestMode, syncToCloud]);
+
+  // Auto-sync every 30 seconds when online — DISABLED for guest demo sessions
+  useEffect(() => {
+    if (!user || isGuestMode || user.role === 'super_admin' || !user.clinic_id) {
+      syncedPatientIds.current.clear();
+      syncedEncounterIds.current.clear();
+      syncService.clearClinicScope();
+      syncService.stopAutoSync();
+      return;
+    }
+    syncedPatientIds.current.clear();
+    syncedEncounterIds.current.clear();
+    syncService.setClinicScope(String(user.clinic_id));
+
+    // Proactively pull latest records from server on login / scope change.
+    // On a brand-new device the local DB is empty; the pull fetches ALL clinic
+    // records from the server (lastSync is null ➜ no timestamp filter).
+    syncService.pullAndReconcile().then(result => {
+      console.log(`[Sync] 📥 Initial login pull: ${result.pulledPatients} patients, ${result.pulledEncounters} encounters`);
+      if (result.pulledPatients > 0 || result.pulledEncounters > 0) {
+        setLastSync(new Date());
+      }
+    }).catch(err => {
+      console.warn('[Sync] Initial login pull warning:', err);
+    });
+
+    syncService.startAutoSync(30000);
+    return () => syncService.stopAutoSync();
+  }, [user, isGuestMode]);
 
   // Update pending count whenever the queue changes
   useEffect(() => {

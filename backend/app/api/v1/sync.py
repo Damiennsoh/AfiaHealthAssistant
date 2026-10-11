@@ -39,8 +39,11 @@ async def pull_changes(
     service = SyncService(db)
 
     parsed_sync_at = None
-    if last_sync_at:
-        parsed_sync_at = datetime.fromisoformat(last_sync_at.replace("Z", "+00:00"))
+    if last_sync_at and last_sync_at.strip() and last_sync_at not in ("null", "undefined"):
+        try:
+            parsed_sync_at = datetime.fromisoformat(last_sync_at.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            parsed_sync_at = None
 
     return await service.pull_changes(device_id, current_user, parsed_sync_at)
 
