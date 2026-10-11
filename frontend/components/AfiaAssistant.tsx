@@ -61,7 +61,7 @@ const sectionConfig = {
 // Text sanitization helper
 const cleanText = (text: string) => text.replace(/[#*_~`]/g, "").replace(/\n{3,}/g, "\n\n").trim();
 
-const REMOTE_RETRIEVAL_TIMEOUT_MS = 3000;
+const REMOTE_RETRIEVAL_TIMEOUT_MS = 15000;
 const LOCAL_RETRIEVAL_TIMEOUT_MS = 5000;
 
 type QdrantResult = {
@@ -103,13 +103,14 @@ function mergeRetrievedKnowledge(
   remoteResults: QdrantResult[],
   countryCode: 'GH' | 'ZW'
 ) {
-  const candidates: Array<{ chunk: KnowledgeChunk; score: number; provider: string }> = [
-    ...remoteResults
-      .filter((result) => Number.isFinite(result.confidence) && result.confidence >= 0.25)
-      .map((result, index) => ({
+  // Qdrant Cloud hosted knowledge base is the authoritative SOURCE OF TRUTH.
+  // We boost Qdrant protocols so they always take precedence over local keyword fallbacks.
+  const qdrantCandidates: Array<{ chunk: KnowledgeChunk; score: number; provider: string }> = remoteResults
+    .filter((result) => Number.isFinite(result.confidence) && result.confidence >= 0.25)
+    .map((result, index) => ({
       chunk: {
         id: `qdrant-${countryCode}-${index}`,
-        section: String(result.metadata.chapter || result.metadata.section || result.citation || `Result ${index + 1}`),
+        section: String(result.metadata?.chapter || result.metadata?.section || result.citation || `Guideline ${index + 1}`),
         content: result.text,
         source: result.citation || result.source || (
           countryCode === "ZW"
@@ -119,16 +120,21 @@ function mergeRetrievedKnowledge(
         dateAdded: "",
         countryCode,
       },
-      score: result.confidence,
+      score: 1.0 + (result.confidence || 0), // Boost above 1.0 so Qdrant is prioritized as primary source of truth
       provider: "Qdrant",
-    })),
+    }));
+
+  const localCandidates: Array<{ chunk: KnowledgeChunk; score: number; provider: string }> = [
     ...semanticMatches.map((match) => ({ chunk: match.chunk, score: match.score, provider: "Local IndexedDB" })),
     ...keywordChunks.map((chunk) => ({
       chunk,
-      score: (chunk as KnowledgeChunk & { _score?: number })._score ?? 0.6,
+      score: (chunk as KnowledgeChunk & { _score?: number })._score ?? 0.5,
       provider: "Local IndexedDB",
     })),
-  ].filter((candidate) => candidate.chunk.content.trim().length > 0);
+  ];
+
+  const candidates = [...qdrantCandidates, ...localCandidates]
+    .filter((candidate) => candidate.chunk.content && candidate.chunk.content.trim().length > 0);
 
   const bestByContent = new Map<string, (typeof candidates)[number]>();
   for (const candidate of candidates) {
@@ -389,7 +395,7 @@ export function AfiaAssistant() {
         let hasMatch = false;
         let protocolContextText = "None";
 
-        console.log('[STAGE 1] Starting parallel local and hosted retrieval for jurisdiction:', clinicCountryCode);
+        console.log('[STAGE 1] Querying Qdrant vector database (hosted source of truth) for jurisdiction:', clinicCountryCode);
 
         // Qdrant receives only the complaint-focused query, never the patient encounter context.
         const qdrantQuery = removePatientIdentifiers(retrievalQuery, patient, encounter).slice(0, 500);
@@ -403,11 +409,14 @@ export function AfiaAssistant() {
                 countryCode: clinicCountryCode,
                 signal: qdrantController.signal,
               }).then((response) => {
-                if (response.data) return { results: response.data.results, unavailable: false };
-                console.warn('[STAGE 1] Qdrant unavailable:', response.error || response.status);
-                return { results: [], unavailable: true };
+                if (response.data && Array.isArray(response.data.results) && response.data.results.length > 0) {
+                  console.log(`[STAGE 1] ✅ Hosted Qdrant returned ${response.data.results.length} protocols`);
+                  return { results: response.data.results, unavailable: false };
+                }
+                console.warn('[STAGE 1] Qdrant returned 0 results or degraded:', response.error || response.status);
+                return { results: response.data?.results || [], unavailable: !response.data };
               }).catch((retrievalError) => {
-                console.warn('[STAGE 1] Qdrant retrieval failed:', retrievalError);
+                console.warn('[STAGE 1] Qdrant retrieval error, falling back to local:', retrievalError);
                 return { results: [], unavailable: true };
               }).finally(() => clearTimeout(qdrantTimeout));
             })();

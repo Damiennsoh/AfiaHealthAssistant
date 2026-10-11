@@ -33,6 +33,8 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useOnlineStatus } from "@/hooks/use-online-status";
+import { useAuth } from "@/contexts/AuthContext";
+import { afiaAPI } from "@/lib/afia-api";
 import { saveChat, loadChat, clearChat } from "@/lib/chat-persistence";
 import { searchLocalKnowledge } from "@/lib/knowledge-base";
 import { BackNavigation } from "./ui/back-navigation";
@@ -54,9 +56,18 @@ export type Message = {
 };
 
 export function AIAssistant() {
+  const { user } = useAuth();
   const searchParams = useSearchParams();
   const isOnline = useOnlineStatus();
   const scrollRef = useRef<HTMLDivElement>(null);
+  
+  const clinicCountryCode = (() => {
+    const fromUser = user?.clinic?.country_code ?? user?.country_code;
+    if (fromUser === 'ZW' || fromUser === 'zw' || fromUser === 'GH' || fromUser === 'gh') {
+      return fromUser.toUpperCase() as 'GH' | 'ZW';
+    }
+    return 'GH' as const;
+  })();
   
   // URL Context
   const patientId = searchParams.get("patientId");
@@ -187,12 +198,37 @@ export function AIAssistant() {
 
     // REAL INTELLIGENCE ORCHESTRATOR
     try {
-      // 1. Retrieve Knowledge Context (Client-Side RAG)
+      // 1. Retrieve Knowledge Context (Hosted Qdrant first as source of truth, fallback to local IndexedDB)
       let contextChunks: any[] = [];
       try {
         if (userMsg.trim()) {
-          contextChunks = await searchLocalKnowledge(userMsg);
-          console.log("Found chunks:", contextChunks.length);
+          let retrievedFromQdrant = false;
+          if (isOnline) {
+            try {
+              const qdrantRes = await afiaAPI.queryKnowledge(userMsg.trim(), {
+                topK: 5,
+                countryCode: clinicCountryCode,
+              });
+              if (qdrantRes.data?.results && qdrantRes.data.results.length > 0) {
+                contextChunks = qdrantRes.data.results.map((r: any) => ({
+                  id: r.id || String(Math.random()),
+                  section: r.title || r.metadata?.title || "Clinical Guidelines",
+                  content: r.content || r.text || "",
+                  source: r.source || r.metadata?.source || (clinicCountryCode === "ZW" ? "Zimbabwe EDLIZ 2020 (Hosted Qdrant)" : "GHS STG 2017 (Hosted Qdrant)"),
+                  dateAdded: new Date().toISOString(),
+                }));
+                retrievedFromQdrant = true;
+                console.log("[AIAssistant] ✅ Retrieved authoritative protocols from hosted Qdrant:", contextChunks.length);
+              }
+            } catch (qErr) {
+              console.warn("[AIAssistant] Hosted Qdrant retrieval error, falling back to local:", qErr);
+            }
+          }
+
+          if (!retrievedFromQdrant) {
+            contextChunks = await searchLocalKnowledge(userMsg, clinicCountryCode);
+            console.log("[AIAssistant] Falling back to local IndexedDB chunks:", contextChunks.length);
+          }
         }
       } catch (err) {
         console.error("Knowledge retrieval failed:", err);
