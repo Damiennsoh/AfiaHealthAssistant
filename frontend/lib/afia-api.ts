@@ -174,8 +174,10 @@ class AfiaAPI {
       ...((options.headers as Record<string, string>) || {}),
     };
 
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+    const activeToken = this.token || (typeof window !== 'undefined' ? localStorage.getItem('afia_access_token') : null);
+    if (activeToken) {
+      this.token = activeToken;
+      headers['Authorization'] = `Bearer ${activeToken}`;
     }
 
     try {
