@@ -49,18 +49,31 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const syncedPatientIds = useRef<Set<string>>(new Set());
   const syncedEncounterIds = useRef<Set<string>>(new Set());
 
-  // Listen to network state
+  // Listen to network state and foreground visibility
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const handleOnline = () => setIsOnline(true);
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (user && !isGuestMode && user.clinic_id) {
+        syncToCloud().catch(err => console.warn('[Sync] Reconnect sync error:', err));
+      }
+    };
     const handleOffline = () => setIsOnline(false);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine && user && !isGuestMode && user.clinic_id) {
+        syncService.pullAndReconcile().catch(err => console.warn('[Sync] Foreground pull error:', err));
+      }
+    };
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, []);
+  }, [user, isGuestMode, syncToCloud]);
 
   // Auto-sync every 30 seconds when online — DISABLED for guest demo sessions
   useEffect(() => {
